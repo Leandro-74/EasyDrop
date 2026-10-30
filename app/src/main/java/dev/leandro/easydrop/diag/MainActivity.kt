@@ -45,11 +45,13 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     private lateinit var aware: AwareController
+    private lateinit var radio: RadioTests
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         aware = AwareController(this) { DiagLog.add(it) }
+        radio = RadioTests(this) { DiagLog.add(it) }
 
         val launcher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
@@ -105,6 +107,11 @@ class MainActivity : ComponentActivity() {
                 }
                 "connect" -> aware.connect()
                 "stop" -> aware.stop()
+                "hotspot" -> radio.startHotspot()
+                "hotspot-stop" -> radio.stopHotspot()
+                "bleadv" -> radio.startBleAdvertise()
+                "bleadv-stop" -> radio.stopBleAdvertise()
+                "blescan" -> radio.startBleScan()
                 "autorun" -> {
                     aware.attach()
                     delay(2_000)
