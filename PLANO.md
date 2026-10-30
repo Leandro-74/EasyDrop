@@ -240,8 +240,24 @@ Sem isso, o resto é chute.
 
 **Decisão da Fase 0:** Wi-Fi Aware sai do caminho principal — o aparelho de referência não o
 oferece. O transporte passa a ser **BLE (descoberta) + LAN comum/LocalOnlyHotspot (dados)**,
-com Wi-Fi Direct como plano B. Pendente: validar hotspot, BLE e Direct entre os dois
-aparelhos.
+com Wi-Fi Direct como plano B.
+
+**Transporte medido (30/10/2026, aparelhos a ~20 cm):**
+
+| Caminho | Como | Resultado | Observação |
+|---|---|---|---|
+| BLE (descoberta) | Edge anuncia, S21 escaneia | 13 anúncios em 10 s, RSSI −34 a −38 dBm | simétrico; service data chega intacto |
+| Hotspot + WNS | Edge hospeda, S21 entra | 9,1–10,6 MB/s (~85 Mbps) | 1 diálogo do sistema no lado que entra |
+| LAN comum | os dois no Wi-Fi de casa | 4,0–4,4 MB/s | limitado pelo AP (−66 dBm, Rx 6 Mbps), não pelo protocolo |
+
+Conclusões:
+
+- **O caminho mínimo fecha:** BLE descobre, hotspot conecta, TCP transfere.
+- O diálogo do `WifiNetworkSpecifier` ("Conectar ao dispositivo") é aceitável e pode ser
+  encaixado no fluxo de confirmação do receptor.
+- Wi-Fi Direct deixa de ser necessidade e vira otimização de throughput.
+- O hotspot do Edge convive com o Wi-Fi normal (`wlan1` continua conectado enquanto o
+  `wlan2` serve o AP) — o risco de derrubar a internet não se confirmou nesse aparelho.
 
 ### Fase 1 — MVP EasyDrop ↔ EasyDrop (3–4 semanas)
 
