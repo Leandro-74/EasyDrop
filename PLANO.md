@@ -349,3 +349,50 @@ consumo de bateria por transferência.
 2. **Identidade visual** — nome do app já está fechado; falta ícone e paleta.
 3. **Confirmar Fase 0** — rodar o app de diagnóstico nos dois aparelhos antes de escrever
    qualquer linha do produto.
+
+---
+
+## 11. Laboratório de protocolos (`:lab`)
+
+App separado do diagnóstico, feito para testar um protocolo por vez. A tela inteira muda de
+cor conforme o estado: cinza parado, azul procurando, âmbar peer encontrado, laranja
+conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada teste transfere
+16 MB e mostra tempo de setup e MB/s.
+
+### Modos
+
+| Modo | Como identifica | Como conecta | Estado |
+|---|---|---|---|
+| LAN + mDNS | mDNS | TCP na rede comum | **funciona** |
+| BLE + Hotspot | BLE (UUID + RSSI) | GATT entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
+| Wi-Fi Direct | Wi-Fi Direct | grupo P2P | pendente |
+| NFC + Hotspot | toque NFC | `WifiNetworkSpecifier` | pendente |
+
+### Medições (30/10/2026)
+
+| Caminho | Setup | Throughput |
+|---|---|---|
+| LAN + mDNS | 1,5 s para conectar | 4,6 MB/s (limitado pelo AP) |
+| BLE: anúncio → RSSI | 0,1–0,6 s | — |
+| BLE: GATT com credenciais | 0,7–1,3 s | — |
+| S21 hospeda, Edge entra (WNS) | 6–11 s (inclui diálogo) | **14–17 MB/s** |
+| Edge hospeda, S21 entra (WNS) | 7–12 s | **0,8–1,9 MB/s** |
+| Edge hospeda, S21 conectado normalmente | 2 s | **11,7–12,2 MB/s** |
+
+### O achado que muda a Fase 1
+
+A **mesma rede** rende 12 MB/s com o S21 conectado normalmente e 0,8–1,9 MB/s quando ele entra
+por `WifiNetworkSpecifier`. Não é o aparelho hospedeiro: com o S21 hospedando, o Edge como
+cliente WNS faz 14–17 MB/s.
+
+O que já se sabe:
+
+- não é conexão dupla — durante o WNS o S21 fica com uma única interface (`wlan0`);
+- não é o link — o próprio Android reporta 216–229 Mbps;
+- `WifiLock` de baixa latência (`WIFI_MODE_FULL_LOW_LATENCY`) melhora de 0,8 para ~1,9 MB/s;
+- a política de economia de energia do Samsung (`wifi_power_save=120`) é a suspeita principal.
+
+Consequência: o caminho WNS **não pode ser o único** transporte. Candidatos a testar em seguida,
+em ordem de custo: `WifiNetworkSuggestion` (a rede entra como conexão normal, que é a que rende
+12 MB/s), Wi-Fi Direct, e hotspot em 5 GHz (exige `SoftApConfiguration.Builder`, que o SDK
+instalado não expõe — precisa atualizar o platform tools ou usar reflexão).

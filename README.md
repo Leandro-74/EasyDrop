@@ -73,9 +73,27 @@ caminho principal e virou bônus opcional.
 ## Estrutura
 
 ```
-app/        app Android (Kotlin + Jetpack Compose) — hoje, o diagnóstico da Fase 0
+app/        diagnóstico da Fase 0 (capacidades de rádio, hotspot, BLE, throughput)
+lab/        laboratório de protocolos: testa um caminho de conexão por vez
 PLANO.md    plano técnico: protocolos, arquitetura, riscos, medições
 ```
+
+### Laboratório (`lab/`)
+
+Tela inteira colorida pelo estado — cinza parado, azul procurando, âmbar peer encontrado,
+laranja conectando, **verde conectado**, verde escuro transferindo, vermelho erro. Escolha o
+modo e o papel, toque em Iniciar, e cada teste transfere 16 MB medindo tempo de setup e MB/s.
+
+```bash
+PKG=dev.leandro.easydrop.lab
+adb shell am start -n $PKG/.MainActivity --es action start --es mode BLE --es role SENDER
+adb shell am start -n $PKG/.MainActivity --es action start --es mode BLE --es role RECEIVER
+adb shell am start -n $PKG/.MainActivity --es action stop
+adb logcat -s EasyDropLab:I
+```
+
+Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `P2P` (Wi-Fi Direct) e `NFC` — os dois
+últimos ainda pendentes.
 
 ## Compilar
 
