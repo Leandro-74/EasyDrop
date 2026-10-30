@@ -79,6 +79,50 @@ class RadioTests(
         log("Hotspot: solicitado encerramento")
     }
 
+    // ------------------------------------------------------------ join (WNS)
+
+    /**
+     * Caminho que o app real usa para entrar no hotspot do outro aparelho.
+     * Diferente de `cmd wifi connect-network`, aqui o Android mostra um diálogo do sistema
+     * pedindo confirmação — é a UX real do produto.
+     */
+    fun join(ssid: String, passphrase: String) {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        if (cm == null) {
+            log("Join: ConnectivityManager indisponível")
+            return
+        }
+
+        val specifier = android.net.wifi.WifiNetworkSpecifier.Builder()
+            .setSsid(ssid)
+            .setWpa2Passphrase(passphrase)
+            .build()
+
+        val request = android.net.NetworkRequest.Builder()
+            .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(specifier)
+            .build()
+
+        log("Join: pedindo '$ssid' (o sistema deve mostrar o diálogo)")
+
+        cm.requestNetwork(request, object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                val props = cm.getLinkProperties(network)
+                val ips = props?.linkAddresses?.joinToString { it.address.hostAddress ?: "?" }
+                log("Join: CONECTADO — ips locais: $ips")
+            }
+
+            override fun onUnavailable() {
+                log("Join: indisponível (diálogo recusado ou timeout)")
+            }
+
+            override fun onLost(network: android.net.Network) {
+                log("Join: rede perdida")
+            }
+        }, 60_000)
+    }
+
     // ------------------------------------------------------------------ BLE
 
     private fun adapter() = context.getSystemService(BluetoothManager::class.java)?.adapter
@@ -146,13 +190,28 @@ class RadioTests(
         scanner = scan
 
         val seen = LinkedHashMap<String, Int>()
+        var easyDropHits = 0
+        var bestEasyDrop = Int.MIN_VALUE
 
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val address = result.device.address
+                val record = result.scanRecord
+                val uuids = record?.serviceUuids?.map { it.uuid } ?: emptyList()
+                val ours = record?.getServiceData(ParcelUuid(EASY_DROP_UUID))
+
+                if (uuids.contains(EASY_DROP_UUID)) {
+                    easyDropHits++
+                    bestEasyDrop = maxOf(bestEasyDrop, result.rssi)
+                    log(
+                        "BLE: EASYDROP em $address rssi=${result.rssi} " +
+                            "data=${ours?.joinToString(",") ?: "sem dados"}",
+                    )
+                }
+
                 if (seen.put(address, result.rssi) == null && seen.size <= 20) {
                     val name = result.device.name ?: "?"
-                    log("BLE: $name $address rssi=${result.rssi}")
+                    log("BLE: $name $address rssi=${result.rssi} uuids=${uuids.size}")
                 }
             }
 
@@ -167,7 +226,11 @@ class RadioTests(
         handler.postDelayed({
             scan.stopScan(callback)
             val strongest = seen.maxByOrNull { it.value }
-            log("BLE: scan encerrado — ${seen.size} dispositivos, mais forte=${strongest?.key} (${strongest?.value} dBm)")
+            log(
+                "BLE: scan encerrado — ${seen.size} dispositivos, " +
+                    "$easyDropHits anúncios EasyDrop, melhor rssi=$bestEasyDrop, " +
+                    "mais forte=${strongest?.key} (${strongest?.value} dBm)",
+            )
         }, SCAN_MS)
     }
 }

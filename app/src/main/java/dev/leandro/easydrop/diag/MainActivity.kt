@@ -46,12 +46,14 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var aware: AwareController
     private lateinit var radio: RadioTests
+    private lateinit var lan: LanTransfer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         aware = AwareController(this) { DiagLog.add(it) }
         radio = RadioTests(this) { DiagLog.add(it) }
+        lan = LanTransfer(this) { DiagLog.add(it) }
 
         val launcher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
@@ -93,6 +95,11 @@ class MainActivity : ComponentActivity() {
         DiagLog.add("ação recebida: $action")
 
         lifecycleScope.launch {
+            if (action.startsWith("send:")) {
+                lan.send(action.removePrefix("send:"))
+                return@launch
+            }
+
             when (action) {
                 "attach" -> aware.attach()
                 "publish" -> {
@@ -109,9 +116,15 @@ class MainActivity : ComponentActivity() {
                 "stop" -> aware.stop()
                 "hotspot" -> radio.startHotspot()
                 "hotspot-stop" -> radio.stopHotspot()
+                "join" -> {
+                    val ssid = intent.getStringExtra("ssid")
+                    val pass = intent.getStringExtra("pass")
+                    if (ssid != null && pass != null) radio.join(ssid, pass) else DiagLog.add("join: faltam ssid/pass")
+                }
                 "bleadv" -> radio.startBleAdvertise()
                 "bleadv-stop" -> radio.stopBleAdvertise()
                 "blescan" -> radio.startBleScan()
+                "serve" -> lan.serve()
                 "autorun" -> {
                     aware.attach()
                     delay(2_000)
