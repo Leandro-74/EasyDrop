@@ -23,7 +23,7 @@ class RadioTests(
 ) {
 
     companion object {
-        val EASY_DROP_UUID: UUID = UUID.fromString("0000fe2c-0000-1000-8000-00805f9b34fb")
+        val EASY_DROP_UUID: UUID = UUID.fromString("6d2f8a41-3c7e-4b95-a1d6-8f0e2c4b7a93")
         private const val SCAN_MS = 10_000L
     }
 
@@ -155,11 +155,16 @@ class RadioTests(
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(EASY_DROP_UUID))
+            .build()
+
+        // 128 bits de UUID já ocupam 18 dos 31 bytes do pacote; o service data vai no
+        // scan response, que tem espaço próprio.
+        val scanResponse = AdvertiseData.Builder()
             .addServiceData(ParcelUuid(EASY_DROP_UUID), byteArrayOf(1, 0, 0, 1))
             .build()
 
         log("BLE: iniciando advertise")
-        adv.startAdvertising(settings, data, object : AdvertiseCallback() {
+        adv.startAdvertising(settings, data, scanResponse, object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                 log("BLE: advertise ATIVO (tx=${settingsInEffect.txPowerLevel})")
             }
