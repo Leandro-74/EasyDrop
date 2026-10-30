@@ -16,9 +16,14 @@ Quick Share**, e o protocolo de rede do Quick Share é implementável de forma i
 (já existem implementações open source que conversam com Android). O que **não** é viável é o
 caminho do AirDrop/iPhone via `mosey`, que exige stack de kernel e rádio específicos.
 
-Recomendação em uma linha: **Fase 1 com protocolo próprio sobre Wi-Fi Aware + BLE, com
-fallback Wi-Fi Direct/hotspot; interoperabilidade com Quick Share só depois de validar em
+Recomendação em uma linha: **Fase 1 com protocolo próprio sobre BLE (descoberta) + Wi-Fi
+Direct/LocalOnlyHotspot (dados); interoperabilidade com Quick Share só depois de validar em
 hardware; Apple fica fora do escopo por decisão de produto.**
+
+> **Correção depois da Fase 0:** o Edge 50 Ultra não expõe Wi-Fi Aware. O HAL do Wi-Fi suporta
+> NAN, mas a Motorola não registra o serviço `wifi_aware` no framework. Como o Edge é o
+> aparelho de referência, NAN deixa de ser o transporte principal. Ver seção 3.3 e os
+> resultados da Fase 0.
 
 Decisões já fechadas:
 
@@ -69,24 +74,29 @@ Isso é viável. É o que NearDrop e Packet já fazem.
 - Ou seja: **não dá para fazer AirDrop em Android stock por API pública.** Nem com root no S21,
   porque o problema é driver/rádio, não permissão.
 
-### 3.3 Wi-Fi Aware (NAN) — a base do nosso protocolo
+### 3.3 Wi-Fi Aware (NAN) — funciona no S21, desligado no Edge
 
 - API pública desde Android 8 (`FEATURE_WIFI_AWARE`), com `publish`/`subscribe` e data path
-  IPv6 link-local.
-- Ranging (802.11mc/az) disponível a partir do Android 13 — é o que dá a sensação real de
-  "aproximou, apareceu".
-- Não depende de GMS, não depende de rede/internet, não depende de roteador.
-- **Risco:** disponibilidade é por aparelho. Precisa ser confirmada no Edge 50 Ultra e no S21.
+  IPv6 link-local. Ranging (802.11mc/az) desde o Android 13.
+- **S21:** funciona. `isAvailable = true`, attach/publish/subscribe sem erro.
+- **Edge 50 Ultra:** não funciona. `hasSystemFeature` = false, `getSystemService` devolve
+  `null` e o binder `wifi_aware` não aparece no `service list` (só `wifi`, `wifip2p`,
+  `wifirtt`, `wifiscanner`). O HAL até reporta `WIFI_FEATURE_AWARE` no `dumpsys wifi`, mas a
+  Motorola não registra o serviço — o rádio suporta, o framework não expõe.
+- **Consequência:** NAN não pode ser o transporte principal, porque o aparelho de referência
+  (o que tem Quick Drop) não o oferece. Só voltaria com ROM modificada/root, o que não é
+  produto.
 
 ### 3.4 Alternativas de transporte
 
 | Transporte | Vantagem | Limite |
 |---|---|---|
-| Wi-Fi Aware | Descoberta + dados + ranging, sem infraestrutura | Suporte irregular; throughput médio |
-| Wi-Fi Direct | Throughput alto, amplamente suportado | UX de pareamento chata; conflita com Wi-Fi normal |
-| LocalOnlyHotspot | Simples, funciona em quase tudo | Sem internet; Android 13+ melhorou a API |
+| Wi-Fi Direct | Throughput alto, presente nos dois aparelhos | UX de pareamento chata; conflita com Wi-Fi normal |
+| LocalOnlyHotspot | Simples, funciona em quase tudo | Sem internet; derruba o Wi-Fi do emissor em muitos aparelhos |
 | BLE | Descoberta barata e onipresente | Lento para dados; advertising em background é restrito |
+| Wi-Fi Aware | Descoberta + dados + ranging, sem infraestrutura | **Indisponível no Edge 50 Ultra**; fica como bônus opcional |
 | NFC (HCE + reader mode) | "Encostou, conectou" — o gesto que o usuário quer | Só bootstrap; exige tela ligada; não é P2P (Beam morreu) |
+| UWB | Ranging de centímetros | **S21 não tem**; só serve como upgrade no Edge |
 
 ### 3.5 Nearby Connections (API do Google Play Services)
 
@@ -121,8 +131,8 @@ aparelhos não têm.
 ### 5.1 Princípios
 
 1. **Descoberta barata, conexão rápida, transferência rápida.** São três problemas diferentes.
-2. **Nenhum caminho único.** Se Aware não existir, cai para Direct; se Direct falhar, cai para
-   hotspot; se tudo falhar, QR code.
+2. **Nenhum caminho único.** BLE descobre; se já houver LAN comum, usa TCP nela; senão sobe
+   hotspot; se o hotspot falhar, tenta Wi-Fi Direct; se tudo falhar, QR code.
 3. **Sem servidor, sem conta, sem nuvem.** Tudo local.
 4. **Segurança por padrão.** Nada é transferido sem confirmação explícita do receptor.
 
@@ -131,22 +141,22 @@ aparelhos não têm.
 ```
 app/                     Compose, share sheet, tela de recebimento, progresso
 core/discovery/          BLE advertise+scan, mDNS, NFC (HCE + reader mode), QR
-core/transport/          Wi-Fi Aware, Wi-Fi Direct, LocalOnlyHotspot — atrás de uma interface
+core/transport/          LAN comum (TCP), LocalOnlyHotspot, Wi-Fi Direct, Aware opcional
 core/crypto/             X25519 efêmero, HKDF-SHA256, ChaCha20-Poly1305, SAS de 6 dígitos
 core/transfer/           framing, chunking 1 MiB, SHA-256 por arquivo, retomada, backpressure
-core/proximity/          RSSI BLE + ranging Aware → "quão perto" → gatilho de UI
+core/proximity/          RSSI BLE (+ UWB quando houver) → "quão perto" → gatilho de UI
 ```
 
 ### 5.3 Fluxo de uma transferência
 
-1. **Emissor** publica um serviço Aware (ou anuncia BLE se Aware não existir) com um
-   identificador efêmero e o hash da própria chave pública.
+1. **Emissor** anuncia por BLE (e por mDNS, se já estiver numa LAN) com um identificador
+   efêmero e o hash da própria chave pública.
 2. **Receptor** escuta; ao detectar proximidade suficiente, mostra o card do emissor.
 3. **Handshake:** X25519 → HKDF → chave de sessão. Ambos derivam um **SAS de 6 dígitos**.
 4. **Confirmação:** o receptor confirma na tela; o SAS é conferido (ou o vínculo é feito por
    toque NFC, que dispensa digitar).
-5. **Transporte:** abre o data path; negocia qual canal usar (Aware por padrão, Direct se o
-   arquivo for grande e o throughput do Aware estiver ruim).
+5. **Transporte:** se os dois já estão na mesma LAN, abre TCP nela. Senão o emissor sobe um
+   LocalOnlyHotspot e o receptor entra via `WifiNetworkSpecifier`. Wi-Fi Direct é o plano B.
 6. **Transferência:** frames de 1 MiB, SHA-256 por arquivo, ACK por janela, retomada por offset.
 7. **Fim:** grava em `Downloads/EasyDrop/` via MediaStore, notifica, apaga buffers.
 
@@ -164,13 +174,16 @@ O gesto "aproximar" tem três níveis de qualidade:
 
 1. **NFC tap** — encostar os aparelhos. Melhor UX, mais restrito (tela ligada, posição do
    sensor varia muito entre modelos).
-2. **Ranging Wi-Fi Aware (802.11az)** — distância real em metros, funciona a ~1 m de precisão.
-   Precisa de Android 13+ e suporte do chip.
+2. **UWB** — distância de centímetros. Só o Edge 50 Ultra tem; o S21 não, então é upgrade,
+   não base.
 3. **RSSI BLE** — grosseiro, mas funciona em tudo. Bom o suficiente para "está perto" (≈1 m),
    ruim para "está a 30 cm".
 
-Plano: RSSI como base universal, ranging como upgrade quando disponível, NFC como atalho
-premium.
+Ranging por Wi-Fi Aware sairia de graça no S21, mas o Edge não expõe o serviço — então não
+conta para o produto.
+
+Plano: RSSI como base universal, UWB como upgrade quando os dois aparelhos tiverem, NFC como
+atalho premium.
 
 ### 5.6 Stack
 
@@ -190,12 +203,12 @@ premium.
 
 App de diagnóstico, sem UI bonita, que reporta e testa:
 
-- `FEATURE_WIFI_AWARE`, `FEATURE_WIFI_DIRECT`, `FEATURE_NFC`, `FEATURE_BLUETOOTH_LE`,
-  `FEATURE_UWB`;
-- `publish` + `subscribe` Aware entre Edge 50 Ultra e S21, com data path aberto;
-- throughput real do data path Aware (arquivo de 100 MB);
-- coexistência: Aware ligado + Wi-Fi conectado a um AP;
-- ranging Aware disponível ou não.
+- capacidades por aparelho (`WIFI_AWARE`, `WIFI_DIRECT`, `NFC`, `BLE`, `UWB`);
+- Aware: attach/publish/subscribe e data path com throughput;
+- LocalOnlyHotspot: sobe? qual SSID? o outro entra?
+- BLE: advertise e scan funcionam juntos?
+- Wi-Fi Direct: descoberta e formação de grupo;
+- coexistência com Wi-Fi conectado a um AP.
 
 **Critério de saída:** sabemos exatamente qual transporte existe em cada aparelho.
 Sem isso, o resto é chute.
@@ -213,18 +226,33 @@ Sem isso, o resto é chute.
 | UWB | ausente |
 | Root | KernelSU (`su -c id` → uid=0) |
 
-Pendente: repetir no Edge 50 Ultra e rodar o data path entre os dois aparelhos.
+**Resultados — Edge 50 Ultra (motorola edge 50 ultra, Android 17 / SDK 37):**
+
+| Item | Resultado |
+|---|---|
+| Wi-Fi Aware | **ausente no framework** (`feature=false`, serviço `wifi_aware` não registrado) |
+| Wi-Fi Direct | disponível |
+| Wi-Fi RTT (802.11mc) | disponível |
+| NFC + HCE | hardware presente, HCE suportado |
+| BLE | presente, ligado |
+| UWB | **presente** |
+| Root | não |
+
+**Decisão da Fase 0:** Wi-Fi Aware sai do caminho principal — o aparelho de referência não o
+oferece. O transporte passa a ser **BLE (descoberta) + LAN comum/LocalOnlyHotspot (dados)**,
+com Wi-Fi Direct como plano B. Pendente: validar hotspot, BLE e Direct entre os dois
+aparelhos.
 
 ### Fase 1 — MVP EasyDrop ↔ EasyDrop (3–4 semanas)
 
-- Descoberta BLE + conexão Aware; fallback Direct/hotspot.
+- Descoberta BLE + conexão por LAN comum ou LocalOnlyHotspot; fallback Wi-Fi Direct.
 - Handshake, SAS, confirmação, transferência com hash e retomada.
 - UI: share sheet, card de recebimento, progresso, histórico.
 - 1 arquivo → N arquivos → pasta → arquivo grande (>2 GB).
 
 ### Fase 2 — Proximidade e atalhos (2 semanas)
 
-- Ranging Aware para o gesto de aproximar.
+- RSSI BLE calibrado para o gesto de aproximar; UWB como upgrade no Edge.
 - NFC tap-to-share (HCE `D2760101` + reader mode) como bootstrap.
 - QR code como fallback universal.
 - "Dispositivos confiáveis" para pular confirmação.
@@ -250,13 +278,14 @@ no iOS 26+, nunca AWDL.
 
 | Risco | Prob. | Impacto | Mitigação |
 |---|---|---|---|
-| Wi-Fi Aware indisponível no S21 | Média | Alto | Fallback Wi-Fi Direct/hotspot desde o dia 1 |
-| Throughput do Aware insuficiente para arquivos grandes | Média | Médio | Upgrade automático para Direct acima de um limiar |
+| Wi-Fi Aware indisponível no Edge 50 Ultra | **confirmado** | Alto | Transporte base virou BLE + hotspot/Direct |
+| LocalOnlyHotspot derruba o Wi-Fi do emissor | Alta | Médio | Preferir LAN comum quando existir; avisar na UI |
+| Throughput do hotspot abaixo do esperado | Média | Médio | Medir na Fase 0; Wi-Fi Direct como plano B |
 | BLE advertising restrito em background | Alta | Médio | Foreground service + notificação persistente |
-| Coexistência Aware × Wi-Fi STA × hotspot | Média | Médio | Testar na Fase 0; negociar canal |
+| Coexistência hotspot × Wi-Fi STA × P2P | Média | Médio | Testar na Fase 0; escolher canal livre |
 | Fragmentação de fabricante (Motorola/Samsung matam serviços) | Alta | Médio | Testar com battery saver, Doze, restrições de OEM |
 | Quick Share mudar o protocolo | Média | Baixo (Fase 3) | Isolar a camada de interop |
-| Aeroporto legal (decompilar/redistribuir binários) | Baixa se disciplinado | Alto | Só código próprio ou OSS com licença compatível |
+| Risco legal (decompilar/redistribuir binários) | Baixa se disciplinado | Alto | Só código próprio ou OSS com licença compatível |
 
 ---
 
