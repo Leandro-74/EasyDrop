@@ -366,7 +366,7 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 | LAN + mDNS | mDNS | TCP na rede comum | **funciona** |
 | BLE + Hotspot | BLE (UUID + RSSI) | GATT entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
 | NFC + Hotspot | toque NFC (AID próprio) | APDU entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
-| Wi-Fi Direct | Wi-Fi Direct | grupo P2P | pendente |
+| Wi-Fi Direct | toque NFC entrega nome + SSID/senha | grupo P2P: receptor é dono, emissor entra | **funciona** |
 
 ### Medições (30/10/2026)
 
@@ -380,14 +380,30 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 | S21 hospeda, Edge envia | 15 s | **6,0 MB/s** |
 | Edge hospeda, S21 envia | 8 s | **13,0 MB/s** |
 | Edge hospeda, S21 recebe | 5–47 s | **2,7 MB/s** |
+| P2P: S21 dono, Edge envia | toque → TCP **3,8 s** | **14,5 MB/s** |
+| P2P: Edge dono, S21 envia | toque → TCP **4,8 s** | **5,0 MB/s** |
 
-### O que foi descoberto
+### Wi-Fi Direct: sem diálogo
+
+O modo P2P resolve o problema do diálogo do `WifiNetworkSpecifier`. O receptor chama
+`createGroup()` (silencioso) e vira dono do grupo; o emissor descobre o peer e entra no grupo
+que já existe, o que não pede confirmação. Do toque até o TCP: 3,8–4,8 s.
+
+Três detalhes que custaram para aparecer:
+
+- `requestGroupInfo()` logo após `createGroup()` volta com SSID e senha vazios; precisa repetir
+  até o framework preencher (1 tentativa de 500 ms resolve).
+- o MAC local do P2P vem mascarado (`02:00:00:00:00:00`) desde o Android 10; o que dá para
+  publicar é o **nome** do aparelho, e o emissor descobre o endereço real sozinho.
+- a descoberta do framework estagna: precisa reemitir `discoverPeers` a cada ~8 s. Começar a
+  descoberta quando o emissor é armado (e não depois do toque) tirou 14 s do caminho crítico.
+
+### O que foi descoberto no hotspot
 
 **1. Quem recebe deve hospedar o hotspot.** O cliente de `WifiNetworkSpecifier` fica em
 economia de energia e **recebe** devagar, mas **transmite** bem (229 Mbps de Tx contra 17 Mbps
 de Rx com RSSI -10). Invertendo a hospedagem, o cliente só envia: o pior caso subiu de 2,7 para
-6,0 MB/s e o melhor ficou em 13,0 MB/s. A regra vale para qualquer par — o lado que recebe
-nunca deve ser o cliente.
+6,0 MB/s e o melhor ficou em 13,0 MB/s.
 
 **2. `removeCapability(NET_CAPABILITY_INTERNET)` era parte do problema.** Sem ele a rede é
 tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo teste subiu de
@@ -399,11 +415,12 @@ tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo t
 **4. `WifiNetworkSuggestion` não funciona no S21.** `addNetworkSuggestions` devolve sucesso
 (status 0), mas `cmd wifi list-suggestions` não lista nada e a rede nunca conecta.
 
-**5. O setup é dominado pelo diálogo do sistema.** `NetworkRequestDialogActivity` ("Conectar ao
-aparelho?") espera um toque; é ele que faz o setup variar de 5 a 47 s. O `WifiLock` de baixa
-latência não desliga o power save nessa rede (`mPowerSaveDisableRequests 0`).
+**5. O setup do hotspot é dominado pelo diálogo do sistema.** `NetworkRequestDialogActivity`
+("Conectar ao aparelho?") espera um toque; é ele que faz o setup variar de 5 a 47 s. O
+`WifiLock` de baixa latência não desliga o power save nessa rede (`mPowerSaveDisableRequests 0`).
 
-Consequências para a Fase 1: manter o hotspot com o receptor, aceitar a confirmação do sistema
-como o "confirmar" do fluxo, e testar Wi-Fi Direct como alternativa que dispensa o diálogo do
-specifier. Hotspot em 5 GHz exige `SoftApConfiguration.Builder`, que o SDK instalado não expõe.
+Consequência para a Fase 1: **Wi-Fi Direct como transporte principal** (sem confirmação manual,
+4–5 s de setup) e hotspot local como reserva para aparelhos sem P2P. O toque NFC continua sendo
+o gatilho nos dois.
+
 

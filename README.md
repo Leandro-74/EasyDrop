@@ -55,6 +55,7 @@ Medições reais em 30/10/2026, com os aparelhos a ~20 cm:
 |---|---|
 | BLE (descoberta) | 13 anúncios em 10 s, RSSI −32 a −39 dBm, simétrico |
 | NFC (toque → credenciais) | **0,02 s** |
+| Wi-Fi Direct (toque → TCP) | **3,8–4,8 s**, sem diálogo, **5–14,5 MB/s** |
 | Hotspot + `WifiNetworkSpecifier` | **6–13 MB/s**, 1 diálogo do sistema |
 | LAN comum | 4,4 MB/s (limitado pelo AP de teste, não pelo protocolo) |
 
@@ -95,8 +96,9 @@ adb shell am start -n $PKG/.MainActivity --es action stop
 adb logcat -s EasyDropLab:I
 ```
 
-Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `P2P` (Wi-Fi Direct) e `NFC` — os dois
-últimos ainda pendentes.
+Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `NFC` (toque + hotspot) e `P2P`
+(toque + Wi-Fi Direct). No toque, quem **recebe** cria o grupo/hotspot e quem **envia** entra
+e empurra os dados.
 
 ## Compilar
 
