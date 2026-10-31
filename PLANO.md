@@ -368,35 +368,64 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 | NFC + Hotspot | toque NFC (AID próprio) | APDU entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
 | Wi-Fi Direct | toque NFC entrega nome + SSID/senha | grupo P2P: receptor é dono, emissor entra | **funciona** |
 
-### Medições (30/10/2026)
+### Medições (31/10/2026)
 
-| Caminho | Setup | Throughput |
+| Caminho | Setup | Throughput no receptor |
 |---|---|---|
 | LAN + mDNS | 1,5 s para conectar | 4,6 MB/s (limitado pelo AP) |
 | BLE: anúncio → RSSI | 0,1–0,6 s | — |
 | BLE: GATT com credenciais | 0,7–1,3 s | — |
 | NFC: toque → credenciais | **0,02 s** | — |
-| S21 hospeda, Edge recebe | 5–15 s | **12,7 MB/s** |
-| S21 hospeda, Edge envia | 15 s | **6,0 MB/s** |
-| Edge hospeda, S21 envia | 8 s | **13,0 MB/s** |
-| Edge hospeda, S21 recebe | 5–47 s | **2,7 MB/s** |
-| P2P: S21 dono, Edge envia | toque → TCP **3,8 s** | **14,5 MB/s** |
-| P2P: Edge dono, S21 envia | toque → TCP **4,8 s** | **5,0 MB/s** |
+| Hotspot: S21 hospeda, Edge recebe | 5–15 s | **12,7 MB/s** |
+| Hotspot: S21 hospeda, Edge envia | 15 s | **6,0 MB/s** |
+| Hotspot: Edge hospeda, S21 envia | 8 s | **13,0 MB/s** |
+| Hotspot: Edge hospeda, S21 recebe | 5–47 s | **2,7 MB/s** |
+| P2P: S21 dono, Edge envia (5 GHz) | toque → TCP **1,1–1,2 s** | **25,5–26,3 MB/s** |
+| P2P: Edge dono, S21 envia (5 GHz) | toque → TCP **1,2 s** | **11,1–26,3 MB/s** |
 
-### Wi-Fi Direct: sem diálogo
+O caminho antigo de P2P (descoberta + WPS) levava 3,8–4,8 s e rendia 5,0–14,5 MB/s. A conexão
+rápida por SSID/senha tirou a descoberta do caminho crítico e estabilizou o setup em ~1,1 s.
 
-O modo P2P resolve o problema do diálogo do `WifiNetworkSpecifier`. O receptor chama
-`createGroup()` (silencioso) e vira dono do grupo; o emissor descobre o peer e entra no grupo
-que já existe, o que não pede confirmação. Do toque até o TCP: 3,8–4,8 s.
+### Wi-Fi Direct: de onde vinha o diálogo
 
-Três detalhes que custaram para aparecer:
+O diálogo intermitente não era do `WifiNetworkSpecifier`; era do próprio P2P. No AOSP, quando o
+dono do grupo recebe um *provision discovery* (`P2P_PROV_DISC_PBC_REQ_EVENT`), o
+`WifiP2pServiceImpl` entra em `UserAuthorizingJoinState` e chama `notifyInvitationReceived()`,
+que abre o diálogo de confirmação. O caminho antigo do laboratório usava exatamente isso:
+`connect(deviceAddress)` com WPS PBC, sem SSID/senha. Às vezes o framework achava um grupo
+persistente e pulava a descoberta; por isso o diálogo era intermitente.
 
-- `requestGroupInfo()` logo após `createGroup()` volta com SSID e senha vazios; precisa repetir
-  até o framework preencher (1 tentativa de 500 ms resolve).
-- o MAC local do P2P vem mascarado (`02:00:00:00:00:00`) desde o Android 10; o que dá para
-  publicar é o **nome** do aparelho, e o emissor descobre o endereço real sozinho.
-- a descoberta do framework estagna: precisa reemitir `discoverPeers` a cada ~8 s. Começar a
-  descoberta quando o emissor é armado (e não depois do toque) tirou 14 s do caminho crítico.
+A correção foi mudar o caminho:
+
+- o receptor cria o grupo com SSID e senha conhecidos (`DIRECT-ED-xxxx` + senha aleatória) e
+  publica **nome, SSID, senha e frequência** pelo NFC;
+- o emissor chama `connect` com SSID/senha, sem endereço de peer. O framework reconhece
+  `isConfigValidAsGroup()` e usa `p2pGroupAdd(config, true)`: entra no grupo direto, sem
+  provision discovery, sem WPS e sem `UserAuthorizingJoinState`;
+- a frequência publicada faz o emissor escanear só o canal do grupo (5745 MHz), em vez de
+  varrer todas as bandas.
+
+Resultado: 6 execuções (3 em cada direção), nenhum diálogo e toque → grupo em 1,0–1,1 s.
+
+### Wi-Fi Direct: grupo velho e 5 GHz
+
+- **Grupo velho sobrevive ao force-stop.** Depois de um teste interrompido, os dois aparelhos
+  podiam ficar donos de grupos diferentes; o emissor via `isGroupOwner: true` e o TCP conectava
+  nele mesmo (`ECONNREFUSED`). O `P2pCleanup` remove o grupo antes de iniciar e ao parar, com
+  timeout de 2 s para o framework não travar o teste.
+- **5 GHz no canal 149 (5745 MHz).** É não-DFS, então não passa por CAC. Se o aparelho não
+  conseguir criar o grupo nessa frequência, cai para automático. O grupo real foi 5745 MHz em
+  todas as execuções.
+- **A frequência real só aparece depois do `createGroup()`.** O `requestGroupInfo()` é repetido
+  a cada 500 ms até trazer a frequência; é ela que vai no payload NFC, não a pedida.
+- **A variância da Edge como receptora é concorrência STA+P2P.** A STA da Edge está em 5 GHz
+  (canal 36) e o grupo em 5745 MHz; o rádio divide tempo entre os dois e o receptor oscila entre
+  11 e 26 MB/s. A STA do S21 está em 2,4 GHz, então o grupo em 5 GHz fica limpo e o S21 como
+  receptor entrega 25,5–26,3 MB/s de forma estável. Não é diferença de Wi-Fi 6 para Wi-Fi 7.
+- **TCP agora tem ACK.** O emissor enviava 16 MB, o buffer do socket aceitava e ele anunciava
+  "enviado" antes de o receptor drenar. Um byte de confirmação no fim faz o emissor esperar o
+  receptor; as duas pontas passaram a reportar a mesma taxa. As duas esperas de 500 ms do
+  `TcpLink` também saíram: toque → transferência concluída ficou em 1,8–2,6 s.
 
 ### O que foi descoberto no hotspot
 
@@ -419,8 +448,10 @@ tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo t
 ("Conectar ao aparelho?") espera um toque; é ele que faz o setup variar de 5 a 47 s. O
 `WifiLock` de baixa latência não desliga o power save nessa rede (`mPowerSaveDisableRequests 0`).
 
-Consequência para a Fase 1: **Wi-Fi Direct como transporte principal** (sem confirmação manual,
-4–5 s de setup) e hotspot local como reserva para aparelhos sem P2P. O toque NFC continua sendo
-o gatilho nos dois.
+Consequência para a Fase 1: **Wi-Fi Direct como transporte principal** — sem confirmação manual,
+~1,2 s de setup e ~25 MB/s no receptor quando o grupo não disputa a banda com a STA — e hotspot
+local como reserva para aparelhos sem P2P. O toque NFC continua sendo o gatilho nos dois. A
+próxima otimização de throughput é escolher o canal do grupo olhando a banda da STA do receptor,
+para não cair em 5+5 na Edge.
 
 

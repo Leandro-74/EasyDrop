@@ -98,7 +98,12 @@ adb logcat -s EasyDropLab:I
 
 Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `NFC` (toque + hotspot) e `P2P`
 (toque + Wi-Fi Direct). No toque, quem **recebe** cria o grupo/hotspot e quem **envia** entra
-e empurra os dados.
+e empurra os dados. No Wi-Fi Direct o receptor publica nome, SSID, senha e frequência; o
+emissor entra direto com SSID/senha, sem descoberta, WPS ou diálogo de confirmação.
+
+```bash
+./gradlew :lab:testDebugUnitTest
+```
 
 ## Compilar
 
