@@ -41,6 +41,8 @@ import androidx.core.content.ContextCompat
 class MainActivity : ComponentActivity() {
 
     private lateinit var controller: LabController
+    private var pendingAction: Intent? = null
+    private var resumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,13 +66,27 @@ class MainActivity : ComponentActivity() {
         if (missing.isNotEmpty()) launcher.launch(missing.toTypedArray())
 
         LabLog.add("EasyDrop Lab · ${Build.MANUFACTURER} ${Build.MODEL}")
-        handleIntent(intent)
+        pendingAction = intent
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        pendingAction?.let {
+            pendingAction = null
+            handleIntent(it)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        resumed = false
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        if (resumed) handleIntent(intent) else pendingAction = intent
     }
 
     /**

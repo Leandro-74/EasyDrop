@@ -1,5 +1,6 @@
 package dev.leandro.easydrop.lab
 
+import android.app.Activity
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,13 +11,16 @@ import kotlinx.coroutines.flow.asStateFlow
  * estado sujo de um teste anterior vaze para o seguinte — no laboratório, repetir o
  * mesmo teste limpo vale mais do que reaproveitar objeto.
  */
-class LabController(private val context: Context) {
+class LabController(private val activity: Activity) {
+
+    private val context: Context = activity
 
     private val _status = MutableStateFlow(LabStatus())
     val status: StateFlow<LabStatus> = _status.asStateFlow()
 
     private var lan: LanMode? = null
     private var ble: BleMode? = null
+    private var nfc: NfcMode? = null
 
     fun start(mode: Mode, role: Role) {
         stop(quiet = true)
@@ -37,6 +41,10 @@ class LabController(private val context: Context) {
                 ble = it
                 it.start()
             }
+            Mode.NFC -> NfcMode(activity, role) { report(it) }.also {
+                nfc = it
+                it.start()
+            }
             else -> fail("${mode.label}: ainda não implementado")
         }
     }
@@ -46,6 +54,8 @@ class LabController(private val context: Context) {
         lan = null
         ble?.stop()
         ble = null
+        nfc?.stop()
+        nfc = null
         _status.value = LabStatus(
             mode = _status.value.mode,
             role = _status.value.role,
