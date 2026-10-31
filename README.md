@@ -36,11 +36,13 @@ O plano técnico completo, com decisões, riscos e medições, está em [`PLANO.
 
 ## Como funciona
 
-1. **Descoberta.** O emissor anuncia um serviço BLE com UUID próprio do EasyDrop. O receptor
-   escaneia, mede o RSSI e mostra o card quando o aparelho está perto o suficiente.
-2. **Transporte.** Se os dois já estão na mesma rede Wi-Fi, usa TCP nela. Senão o emissor sobe
-   um hotspot local e o receptor entra via `WifiNetworkSpecifier` — o Android mostra um único
-   diálogo de confirmação, que se encaixa no fluxo de "Receber".
+1. **Descoberta.** Quem recebe anuncia um serviço BLE com UUID próprio do EasyDrop. Quem envia
+   escaneia, mede o RSSI e mostra o card quando o aparelho está perto o suficiente. No modo
+   toque, quem recebe emula um cartão NFC e as credenciais saem no encostar.
+2. **Transporte.** Se os dois já estão na mesma rede Wi-Fi, usa TCP nela. Senão **quem recebe**
+   sobe um hotspot local e quem envia entra via `WifiNetworkSpecifier` — o Android mostra um
+   único diálogo de confirmação, que se encaixa no fluxo de "Receber". O hotspot fica no lado
+   que recebe porque o cliente do specifier transmite bem mas recebe devagar (ver `PLANO.md`).
 3. **Confirmação.** Handshake X25519, chave de sessão derivada por HKDF e um código de 6
    dígitos (SAS) que os dois lados comparam. Nada é transferido sem confirmação.
 4. **Transferência.** Frames de 1 MiB, SHA-256 por arquivo, retomada por offset.
@@ -52,7 +54,8 @@ Medições reais em 30/10/2026, com os aparelhos a ~20 cm:
 | Caminho | Resultado |
 |---|---|
 | BLE (descoberta) | 13 anúncios em 10 s, RSSI −32 a −39 dBm, simétrico |
-| Hotspot + `WifiNetworkSpecifier` | **10,6 MB/s** (~85 Mbps), 1 diálogo do sistema |
+| NFC (toque → credenciais) | **0,02 s** |
+| Hotspot + `WifiNetworkSpecifier` | **6–13 MB/s**, 1 diálogo do sistema |
 | LAN comum | 4,4 MB/s (limitado pelo AP de teste, não pelo protocolo) |
 
 ### Por que não Wi-Fi Aware
