@@ -422,6 +422,11 @@ Resultado: 6 execuções (3 em cada direção), nenhum diálogo e toque → grup
   (canal 36) e o grupo em 5745 MHz; o rádio divide tempo entre os dois e o receptor oscila entre
   11 e 26 MB/s. A STA do S21 está em 2,4 GHz, então o grupo em 5 GHz fica limpo e o S21 como
   receptor entrega 25,5–26,3 MB/s de forma estável. Não é diferença de Wi-Fi 6 para Wi-Fi 7.
+- **Grupo em 2,4 GHz não resolve a concorrência.** Forçando o grupo em 2412 MHz com a Edge como
+  receptora, a taxa caiu para 2,8–3,9 MB/s nas três execuções. O problema é a STA do **emissor**:
+  o S21 envia com a STA em 2,4 GHz e passa a disputar a mesma banda com o grupo. A banda da STA
+  do receptor não prevê o desempenho, e o receptor não a conhece antes do toque. Por isso o grupo
+  fica fixo em 5745 MHz; a heurística pela banda do receptor foi descartada.
 - **TCP agora tem ACK.** O emissor enviava 16 MB, o buffer do socket aceitava e ele anunciava
   "enviado" antes de o receptor drenar. Um byte de confirmação no fim faz o emissor esperar o
   receptor; as duas pontas passaram a reportar a mesma taxa. As duas esperas de 500 ms do
@@ -450,8 +455,8 @@ tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo t
 
 Consequência para a Fase 1: **Wi-Fi Direct como transporte principal** — sem confirmação manual,
 ~1,2 s de setup e ~25 MB/s no receptor quando o grupo não disputa a banda com a STA — e hotspot
-local como reserva para aparelhos sem P2P. O toque NFC continua sendo o gatilho nos dois. A
-próxima otimização de throughput é escolher o canal do grupo olhando a banda da STA do receptor,
-para não cair em 5+5 na Edge.
+local como reserva para aparelhos sem P2P. O toque NFC continua sendo o gatilho nos dois. O grupo
+fica fixo em 5 GHz (canal 149): a banda que importa é a da STA do emissor, então não há como
+escolher o canal pelo receptor antes do toque.
 
 
