@@ -365,8 +365,8 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 |---|---|---|---|
 | LAN + mDNS | mDNS | TCP na rede comum | **funciona** |
 | BLE + Hotspot | BLE (UUID + RSSI) | GATT entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
+| NFC + Hotspot | toque NFC (AID próprio) | APDU entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
 | Wi-Fi Direct | Wi-Fi Direct | grupo P2P | pendente |
-| NFC + Hotspot | toque NFC | `WifiNetworkSpecifier` | pendente |
 
 ### Medições (30/10/2026)
 
@@ -375,24 +375,35 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 | LAN + mDNS | 1,5 s para conectar | 4,6 MB/s (limitado pelo AP) |
 | BLE: anúncio → RSSI | 0,1–0,6 s | — |
 | BLE: GATT com credenciais | 0,7–1,3 s | — |
-| S21 hospeda, Edge entra (WNS) | 6–11 s (inclui diálogo) | **14–17 MB/s** |
-| Edge hospeda, S21 entra (WNS) | 7–12 s | **0,8–1,9 MB/s** |
-| Edge hospeda, S21 conectado normalmente | 2 s | **11,7–12,2 MB/s** |
+| NFC: toque → credenciais | **0,02 s** | — |
+| S21 hospeda, Edge recebe | 5–15 s | **12,7 MB/s** |
+| S21 hospeda, Edge envia | 15 s | **6,0 MB/s** |
+| Edge hospeda, S21 envia | 8 s | **13,0 MB/s** |
+| Edge hospeda, S21 recebe | 5–47 s | **2,7 MB/s** |
 
-### O achado que muda a Fase 1
+### O que foi descoberto
 
-A **mesma rede** rende 12 MB/s com o S21 conectado normalmente e 0,8–1,9 MB/s quando ele entra
-por `WifiNetworkSpecifier`. Não é o aparelho hospedeiro: com o S21 hospedando, o Edge como
-cliente WNS faz 14–17 MB/s.
+**1. Quem recebe deve hospedar o hotspot.** O cliente de `WifiNetworkSpecifier` fica em
+economia de energia e **recebe** devagar, mas **transmite** bem (229 Mbps de Tx contra 17 Mbps
+de Rx com RSSI -10). Invertendo a hospedagem, o cliente só envia: o pior caso subiu de 2,7 para
+6,0 MB/s e o melhor ficou em 13,0 MB/s. A regra vale para qualquer par — o lado que recebe
+nunca deve ser o cliente.
 
-O que já se sabe:
+**2. `removeCapability(NET_CAPABILITY_INTERNET)` era parte do problema.** Sem ele a rede é
+tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo teste subiu de
+0,3 para 2,0 MB/s. Os sockets são presos à rede explicitamente, então nada vaza para a internet.
 
-- não é conexão dupla — durante o WNS o S21 fica com uma única interface (`wlan0`);
-- não é o link — o próprio Android reporta 216–229 Mbps;
-- `WifiLock` de baixa latência (`WIFI_MODE_FULL_LOW_LATENCY`) melhora de 0,8 para ~1,9 MB/s;
-- a política de economia de energia do Samsung (`wifi_power_save=120`) é a suspeita principal.
+**3. O gargalo não é TCP.** Em 16 MB houve 11.764 segmentos e apenas 3 retransmissões; janela de
+4 MB não mudou a taxa. O limite é o rádio acordando e dormindo, não a janela.
 
-Consequência: o caminho WNS **não pode ser o único** transporte. Candidatos a testar em seguida,
-em ordem de custo: `WifiNetworkSuggestion` (a rede entra como conexão normal, que é a que rende
-12 MB/s), Wi-Fi Direct, e hotspot em 5 GHz (exige `SoftApConfiguration.Builder`, que o SDK
-instalado não expõe — precisa atualizar o platform tools ou usar reflexão).
+**4. `WifiNetworkSuggestion` não funciona no S21.** `addNetworkSuggestions` devolve sucesso
+(status 0), mas `cmd wifi list-suggestions` não lista nada e a rede nunca conecta.
+
+**5. O setup é dominado pelo diálogo do sistema.** `NetworkRequestDialogActivity` ("Conectar ao
+aparelho?") espera um toque; é ele que faz o setup variar de 5 a 47 s. O `WifiLock` de baixa
+latência não desliga o power save nessa rede (`mPowerSaveDisableRequests 0`).
+
+Consequências para a Fase 1: manter o hotspot com o receptor, aceitar a confirmação do sistema
+como o "confirmar" do fluxo, e testar Wi-Fi Direct como alternativa que dispensa o diálogo do
+specifier. Hotspot em 5 GHz exige `SoftApConfiguration.Builder`, que o SDK instalado não expõe.
+
