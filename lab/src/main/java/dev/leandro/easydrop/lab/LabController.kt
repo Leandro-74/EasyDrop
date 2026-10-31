@@ -21,6 +21,7 @@ class LabController(private val activity: Activity) {
     private var lan: LanMode? = null
     private var ble: BleMode? = null
     private var nfc: NfcMode? = null
+    private var direct: WifiDirectMode? = null
 
     fun start(mode: Mode, role: Role) {
         stop(quiet = true)
@@ -45,6 +46,10 @@ class LabController(private val activity: Activity) {
                 nfc = it
                 it.start()
             }
+            Mode.P2P -> WifiDirectMode(activity, role) { report(it) }.also {
+                direct = it
+                it.start()
+            }
             else -> fail("${mode.label}: ainda não implementado")
         }
     }
@@ -56,6 +61,8 @@ class LabController(private val activity: Activity) {
         ble = null
         nfc?.stop()
         nfc = null
+        direct?.stop()
+        direct = null
         _status.value = LabStatus(
             mode = _status.value.mode,
             role = _status.value.role,
