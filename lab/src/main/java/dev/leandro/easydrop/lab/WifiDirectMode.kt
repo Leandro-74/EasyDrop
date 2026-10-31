@@ -72,7 +72,7 @@ class WifiDirectMode(
         }
 
         // Um grupo velho sobrevive ao force-stop e faz o connect criar outro grupo em vez
-        // de entrar no grupo do outro aparelho. Limpar antes evita o diálogo intermitente.
+        // de entrar no grupo do outro aparelho. Limpar antes deixa o teste repetível.
         P2pCleanup.remove(activity) {
             if (finished) return@remove
             if (role == Role.RECEIVER) startReceiver() else startSender()

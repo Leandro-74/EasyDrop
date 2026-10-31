@@ -9,9 +9,8 @@ import android.os.Looper
  * Remove grupo P2P de execuções anteriores.
  *
  * O grupo sobrevive ao force-stop do app. Se ele fica para trás, o `connect` do outro
- * aparelho pode formar um grupo novo em vez de entrar no grupo que já existe — e é nesse
- * caminho que o sistema às vezes pede confirmação. Limpar antes de começar deixa o teste
- * repetível e evita o diálogo.
+ * aparelho pode formar um grupo novo em vez de entrar no grupo que já existe, e o emissor
+ * acaba conectando nele mesmo. Limpar antes de começar deixa o teste repetível.
  */
 object P2pCleanup {
 
