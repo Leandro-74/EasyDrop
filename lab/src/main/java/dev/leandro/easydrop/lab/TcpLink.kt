@@ -57,7 +57,6 @@ class TcpLink(private val onStatus: (LabStatus) -> Unit) {
                 LabLog.add("TCP: conectado em ${elapsed}ms com $peer")
                 onStatus(LabStatus(Phase.CONNECTED, "conectado em ${elapsed}ms", peer, setupMs = elapsed))
 
-                runCatching { Thread.sleep(500) }
                 if (finished) return@execute
 
                 onStatus(LabStatus(Phase.TRANSFERRING, "recebendo 16 MB", peer, setupMs = elapsed))
@@ -84,7 +83,6 @@ class TcpLink(private val onStatus: (LabStatus) -> Unit) {
                 LabLog.add("TCP: conectado em ${elapsed}ms com $host")
                 onStatus(LabStatus(Phase.CONNECTED, "conectado em ${elapsed}ms", host, setupMs = elapsed))
 
-                runCatching { Thread.sleep(500) }
                 if (finished) return@execute
 
                 onStatus(LabStatus(Phase.TRANSFERRING, "enviando 16 MB", host, setupMs = elapsed))
@@ -100,6 +98,11 @@ class TcpLink(private val onStatus: (LabStatus) -> Unit) {
                     sent += size
                 }
                 out.flush()
+
+                // Só termina quando o receptor confirma que drenou os 16 MB. Sem isso,
+                // o buffer do socket faz o emissor parecer mais rápido do que a rede.
+                val ack = socket.getInputStream().read()
+                check(ack >= 0) { "receptor não confirmou" }
 
                 val seconds = max(1L, System.nanoTime() - start) / 1_000_000_000.0
                 val mbps = (PAYLOAD / 1024.0 / 1024.0) / seconds
@@ -130,8 +133,9 @@ class TcpLink(private val onStatus: (LabStatus) -> Unit) {
             var lastLog = start
 
             // Taxa por segundo: mostra se a janela TCP está crescendo ou se bate num teto.
-            while (true) {
-                val read = input.read(buffer)
+            while (received < PAYLOAD) {
+                val want = minOf(buffer.size.toLong(), PAYLOAD - received).toInt()
+                val read = input.read(buffer, 0, want)
                 if (read <= 0) break
                 received += read
                 val now = System.nanoTime()
@@ -139,6 +143,12 @@ class TcpLink(private val onStatus: (LabStatus) -> Unit) {
                     lastLog = now
                     LabLog.add("TCP: t=${(now - start) / 1_000_000_000.0}s ${received / 1024 / 1024} MB")
                 }
+            }
+
+            // Confirma para o emissor que tudo chegou; ele espera este byte.
+            if (received == PAYLOAD) {
+                socket.getOutputStream().write(1)
+                socket.getOutputStream().flush()
             }
 
             val seconds = max(1L, System.nanoTime() - start) / 1_000_000_000.0
