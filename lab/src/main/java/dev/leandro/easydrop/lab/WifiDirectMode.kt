@@ -30,12 +30,16 @@ class WifiDirectMode(
         private const val DISCOVER_MS = 60_000L
         private const val REDISCOVER_MS = 8_000L
         private const val POLL_MS = 500L
+
+        /** Canal 149, não-DFS: evita CAC e dá mais espectro que o grupo em 2,4 GHz. */
+        private const val GROUP_FREQUENCY = 5745
     }
 
     private val beam = NfcBeam(activity)
     private val tcp = TcpLink(onStatus)
     private val handler = Handler(Looper.getMainLooper())
     private val manager = activity.getSystemService(WifiP2pManager::class.java)
+    private val random = java.security.SecureRandom()
 
     private var channel: WifiP2pManager.Channel? = null
 
@@ -67,60 +71,68 @@ class WifiDirectMode(
             return
         }
 
-        if (role == Role.RECEIVER) startReceiver() else startSender()
+        // Um grupo velho sobrevive ao force-stop e faz o connect criar outro grupo em vez
+        // de entrar no grupo do outro aparelho. Limpar antes evita o diálogo intermitente.
+        P2pCleanup.remove(activity) {
+            if (finished) return@remove
+            if (role == Role.RECEIVER) startReceiver() else startSender()
+        }
     }
 
     // ------------------------------------------------------------- receptor
 
     private fun startReceiver() {
         onStatus(LabStatus(Phase.SEARCHING, "criando grupo Wi-Fi Direct"))
-        val manager = manager ?: return
-        val channel = channel ?: return
-
-        // Grupo de um teste anterior atrapalha o próximo; remove e segue de qualquer jeito.
-        manager.removeGroup(
-            channel,
-            object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = createGroup()
-                override fun onFailure(reason: Int) = createGroup()
-            },
-        )
+        createGroup()
     }
 
-    private fun createGroup() {
+    /**
+     * Cria o grupo na frequência pedida com credenciais conhecidas. O emissor recebe
+     * SSID e senha pelo NFC e entra direto no grupo: sem negociação GO, sem WPS e sem
+     * o diálogo de autorização do `UserAuthorizingJoinState`.
+     *
+     * Se o aparelho não conseguir 5 GHz, cai para automático — melhor um grupo em
+     * 2,4 GHz do que nenhum grupo.
+     */
+    private fun createGroup(frequency: Int = GROUP_FREQUENCY) {
         if (finished) return
         val manager = manager ?: return
         val channel = channel ?: return
 
-        manager.createGroup(
-            channel,
-            object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    if (finished) return
-                    LabLog.add("P2P: grupo criado")
-                    publish()
-                }
+        val ssid = "DIRECT-ED-${randomToken(4)}"
+        val pass = randomToken(12)
 
-                override fun onFailure(reason: Int) = fail("createGroup falhou (${reasonName(reason)})")
-            },
-        )
+        val listener = object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                if (finished) return
+                val where = if (frequency == 0) "auto" else "$frequency MHz"
+                LabLog.add("P2P: grupo $ssid criado ($where)")
+                publish(ssid, pass)
+            }
+
+            override fun onFailure(reason: Int) {
+                if (finished) return
+                if (frequency != 0) {
+                    LabLog.add("P2P: $frequency MHz falhou (${reasonName(reason)}), tentando automático")
+                    createGroup(0)
+                } else {
+                    fail("createGroup falhou (${reasonName(reason)})")
+                }
+            }
+        }
+
+        manager.createGroup(channel, P2pConfig.group(ssid, pass, frequency), listener)
     }
 
-    private fun publish(attempt: Int = 0) {
+    private fun publish(ssid: String, pass: String, attempt: Int = 0) {
         val manager = manager ?: return
         val channel = channel ?: return
 
         manager.requestGroupInfo(channel) { group ->
             if (finished) return@requestGroupInfo
-            val ssid = group?.networkName?.takeIf { it.isNotBlank() }
-            val pass = group?.passphrase?.takeIf { it.isNotBlank() }
-
-            if (ssid == null || pass == null) {
-                if (attempt >= 20) {
-                    fail("grupo sem credenciais")
-                    return@requestGroupInfo
-                }
-                handler.postDelayed({ publish(attempt + 1) }, POLL_MS)
+            val frequency = group?.frequency ?: 0
+            if (frequency == 0 && attempt < 10) {
+                handler.postDelayed({ publish(ssid, pass, attempt + 1) }, POLL_MS)
                 return@requestGroupInfo
             }
 
@@ -133,12 +145,13 @@ class WifiDirectMode(
                         fail("sem nome P2P")
                         return@requestDeviceInfo
                     }
-                    handler.postDelayed({ publish(attempt + 1) }, POLL_MS)
+                    handler.postDelayed({ publish(ssid, pass, attempt + 1) }, POLL_MS)
                     return@requestDeviceInfo
                 }
 
-                LabLog.add("P2P: grupo $ssid, eu sou $name")
-                beam.present("$name\n$ssid\n$pass") {
+                LabLog.add("P2P: grupo $ssid em $frequency MHz, eu sou $name")
+                // A frequência vai junto para o emissor escanear só o canal do grupo.
+                beam.present("$name\n$ssid\n$pass\n$frequency") {
                     onStatus(LabStatus(Phase.CONNECTING, "toque detectado, esperando conexão"))
                 }
                 onStatus(LabStatus(Phase.SEARCHING, "encoste o outro aparelho"))
@@ -147,23 +160,41 @@ class WifiDirectMode(
         }
     }
 
+    private fun randomToken(length: Int): String {
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return buildString { repeat(length) { append(chars[random.nextInt(chars.length)]) } }
+    }
+
     // ------------------------------------------------------------- emissor
 
     private fun startSender() {
         onStatus(LabStatus(Phase.SEARCHING, "encoste no receptor"))
-        startDiscovery()
 
         beam.read(
             onPayload = { payload ->
-                val name = payload.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() }
+                val lines = payload.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .toList()
+                val name = lines.getOrNull(0)
+                val ssid = lines.getOrNull(1)
+                val pass = lines.getOrNull(2)
+                val frequency = lines.getOrNull(3)?.toIntOrNull() ?: 0
                 if (name == null) {
                     fail("NFC: payload inválido")
                     return@read
                 }
+
                 onStatus(LabStatus(Phase.FOUND, "toque detectado"))
-                target = name
-                deadline = System.currentTimeMillis() + DISCOVER_MS
-                tryConnect()
+                if (ssid != null && pass != null) {
+                    connectGroup(ssid, pass, frequency)
+                } else {
+                    // Receptor antigo publicava só o nome; cai na descoberta por peer.
+                    target = name
+                    deadline = System.currentTimeMillis() + DISCOVER_MS
+                    startDiscovery()
+                    tryConnect()
+                }
             },
             onError = { fail(it) },
         )
@@ -230,6 +261,38 @@ class WifiDirectMode(
         target = null
         connect(address)
         return true
+    }
+
+    /**
+     * Entra no grupo com SSID e senha, sem passar por provision discovery. É o caminho
+     * que evita o diálogo de confirmação no dono do grupo e não precisa de descoberta.
+     */
+    private fun connectGroup(ssid: String, pass: String, frequency: Int, retried: Boolean = false) {
+        val manager = manager ?: return
+        val channel = channel ?: return
+
+        val config = P2pConfig.group(ssid, pass, frequency)
+
+        val where = if (frequency > 0) "$frequency MHz" else "auto"
+        LabLog.add("P2P: entrando no grupo $ssid em $where")
+        onStatus(LabStatus(Phase.CONNECTING, "entrando no grupo"))
+
+        manager.connect(
+            channel,
+            config,
+            object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = awaitGroup()
+                override fun onFailure(reason: Int) {
+                    // Se o canal publicado estiver errado, tenta de novo em qualquer canal.
+                    if (frequency > 0 && !retried) {
+                        LabLog.add("P2P: $where falhou (${reasonName(reason)}), tentando auto")
+                        connectGroup(ssid, pass, 0, retried = true)
+                    } else {
+                        fail("connect falhou (${reasonName(reason)})")
+                    }
+                }
+            },
+        )
     }
 
     private fun connect(mac: String) {
@@ -315,6 +378,8 @@ class WifiDirectMode(
             runCatching { manager.stopPeerDiscovery(ch, null) }
             runCatching { manager.cancelConnect(ch, null) }
             runCatching { manager.removeGroup(ch, null) }
+        } else {
+            P2pCleanup.remove(activity)
         }
         channel = null
         LabLog.add("P2P: parado")

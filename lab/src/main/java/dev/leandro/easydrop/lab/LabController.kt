@@ -61,8 +61,12 @@ class LabController(private val activity: Activity) {
         ble = null
         nfc?.stop()
         nfc = null
+        val hadDirect = direct != null
         direct?.stop()
         direct = null
+        // Se o app foi reiniciado, o modo P2P não está mais em memória, mas o grupo
+        // pode ter ficado no framework. Nesse caso, limpa na hora de parar.
+        if (!quiet && !hadDirect) P2pCleanup.remove(activity)
         _status.value = LabStatus(
             mode = _status.value.mode,
             role = _status.value.role,
