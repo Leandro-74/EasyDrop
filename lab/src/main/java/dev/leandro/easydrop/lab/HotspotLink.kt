@@ -145,8 +145,9 @@ class HotspotLink(
             .apply {
                 setReferenceCounted(false)
                 runCatching { acquire() }
+                    .onSuccess { LabLog.add("Wi-Fi: lock de baixa latência ativo") }
+                    .onFailure { LabLog.add("Wi-Fi: lock falhou — ${it.javaClass.simpleName}: ${it.message}") }
             }
-        LabLog.add("Wi-Fi: lock de baixa latência ativo")
     }
 
     private fun releaseWifiLock() {
