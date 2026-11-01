@@ -378,10 +378,12 @@ class WifiDirectMode(
             runCatching { manager.stopPeerDiscovery(ch, null) }
             runCatching { manager.cancelConnect(ch, null) }
             runCatching { manager.removeGroup(ch, null) }
-        } else {
-            P2pCleanup.remove(activity)
         }
         channel = null
+
+        // `removeGroup` pode falhar com BUSY e deixar o grupo para trás. O cleanup
+        // repete a remoção e tem timeout próprio, então o próximo teste começa limpo.
+        P2pCleanup.remove(activity)
         LabLog.add("P2P: parado")
     }
 }
