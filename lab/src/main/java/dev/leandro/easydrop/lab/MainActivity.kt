@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity() {
         resumed = false
     }
 
+    /** Sem isso, sair pelo "voltar" deixa sockets, hotspot e grupo P2P vivos. */
+    override fun onDestroy() {
+        controller.stop(quiet = true)
+        super.onDestroy()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
