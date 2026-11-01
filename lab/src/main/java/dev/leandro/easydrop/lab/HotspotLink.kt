@@ -64,7 +64,7 @@ class HotspotLink(
                         fail("hotspot sem credenciais")
                         return
                     }
-                    LabLog.add("hotspot pronto ($ssid / $pass)")
+                    LabLog.add("hotspot pronto ($ssid / ***)")
                     onCredentials(ssid, pass)
                     tcp.serve()
                 }
