@@ -411,6 +411,7 @@ class WifiDirectMode(
     }
 
     private fun fail(message: String) {
+        stopListeningGroup()
         LabLog.add(message)
         onStatus(LabStatus(Phase.ERROR, message))
     }
