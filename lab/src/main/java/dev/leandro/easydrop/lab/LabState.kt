@@ -39,6 +39,13 @@ data class LabStatus(
     val role: Role = Role.SENDER,
 )
 
+/**
+ * Troca de modo/papel só vale parado. Depois de um erro, aceitar a troca e voltar para
+ * [Phase.IDLE] evita o chip que parece clicável mas ignora o clique.
+ */
+fun LabStatus.choose(mode: Mode = this.mode, role: Role = this.role): LabStatus =
+    if (phase == Phase.IDLE || phase == Phase.ERROR) LabStatus(mode = mode, role = role) else this
+
 object LabLog {
 
     const val TAG = "EasyDropLab"

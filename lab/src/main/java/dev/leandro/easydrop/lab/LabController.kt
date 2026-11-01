@@ -75,11 +75,11 @@ class LabController(private val activity: Activity) {
     }
 
     fun selectMode(mode: Mode) {
-        if (_status.value.phase == Phase.IDLE) _status.value = _status.value.copy(mode = mode)
+        _status.value = _status.value.choose(mode = mode)
     }
 
     fun selectRole(role: Role) {
-        if (_status.value.phase == Phase.IDLE) _status.value = _status.value.copy(role = role)
+        _status.value = _status.value.choose(role = role)
     }
 
     /** Os modos reportam só fase/detalhe; modo e papel são do controlador. */
