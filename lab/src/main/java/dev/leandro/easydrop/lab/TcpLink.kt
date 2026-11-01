@@ -55,7 +55,7 @@ class TcpLink(
     /** Sobe o servidor e espera alguém enviar. */
     fun serve() = serve(PORT)
 
-    fun serve(port: Int) {
+    fun serve(port: Int, onReady: () -> Unit = {}) {
         startedAt = System.currentTimeMillis()
         pool.execute {
             try {
@@ -65,6 +65,7 @@ class TcpLink(
                 socketServer.bind(InetSocketAddress(port))
                 socketServer.soTimeout = ACCEPT_MS
                 server = socketServer
+                onReady()
 
                 LabLog.add("TCP: servidor na porta $port")
                 val socket = socketServer.accept()
