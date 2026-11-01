@@ -1,11 +1,16 @@
 package dev.leandro.easydrop.lab
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.wifi.WpsInfo
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 
 /**
  * Wi-Fi Direct: quem recebe cria o grupo (vira dono, sem diálogo) e publica o próprio
@@ -50,6 +55,10 @@ class WifiDirectMode(
     private var deadline = 0L
     private var lastDiscover = 0L
     private var polling = false
+
+    /** Disparado pelo broadcast de conexão do P2P para acordar o poll na hora. */
+    private var groupListener: (() -> Unit)? = null
+    private var groupReceiver: BroadcastReceiver? = null
 
     @Volatile
     private var finished = false
@@ -332,6 +341,7 @@ class WifiDirectMode(
                     if (finished) return@requestConnectionInfo
 
                     if (info != null && info.groupFormed) {
+                        stopListeningGroup()
                         val host = info.groupOwnerAddress?.hostAddress
                         if (host == null) {
                             fail("grupo sem endereço")
@@ -352,7 +362,45 @@ class WifiDirectMode(
             }
         }
 
+        // O broadcast chega assim que o grupo forma; o poll de 500 ms fica como rede de
+        // segurança para quando o framework não entrega o aviso.
+        listenToGroupChanges {
+            handler.removeCallbacks(poll)
+            handler.post(poll)
+        }
         handler.postDelayed(poll, POLL_MS)
+    }
+
+    private fun listenToGroupChanges(onChange: () -> Unit) {
+        groupListener = onChange
+        if (groupReceiver != null) return
+
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION) {
+                    groupListener?.invoke()
+                }
+            }
+        }
+
+        runCatching {
+            ContextCompat.registerReceiver(
+                activity,
+                receiver,
+                IntentFilter(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }.onSuccess {
+            groupReceiver = receiver
+        }.onFailure {
+            LabLog.add("P2P: broadcast indisponível (${it.javaClass.simpleName})")
+        }
+    }
+
+    private fun stopListeningGroup() {
+        groupListener = null
+        groupReceiver?.let { runCatching { activity.unregisterReceiver(it) } }
+        groupReceiver = null
     }
 
     private fun reasonName(reason: Int): String = when (reason) {
@@ -370,6 +418,7 @@ class WifiDirectMode(
     fun stop() {
         finished = true
         beam.stop()
+        stopListeningGroup()
         tcp.stop()
 
         val manager = manager
