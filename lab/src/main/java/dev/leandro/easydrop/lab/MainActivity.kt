@@ -1,6 +1,5 @@
 package dev.leandro.easydrop.lab
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -111,17 +110,7 @@ class MainActivity : ComponentActivity() {
             ?.let { raw -> values.firstOrNull { it.name.equals(raw, ignoreCase = true) } }
             ?: values.first()
 
-    private fun requiredPermissions(): List<String> = buildList {
-        add(Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(Manifest.permission.BLUETOOTH_SCAN)
-            add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-    }
+    private fun requiredPermissions(): List<String> = requiredPermissions(Build.VERSION.SDK_INT)
 }
 
 private fun colorFor(phase: Phase): Color = when (phase) {
