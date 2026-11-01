@@ -1,6 +1,7 @@
 # EasyDrop — Plano Técnico
 
-> Documento de planejamento. Nada foi implementado ainda. Nenhum repositório foi criado.
+> Documento de planejamento e registro de medições. O laboratório de protocolos (`:lab`) já
+> está implementado e validado nos dois aparelhos de teste; o app de produto ainda não existe.
 
 ---
 
@@ -131,8 +132,9 @@ aparelhos não têm.
 ### 5.1 Princípios
 
 1. **Descoberta barata, conexão rápida, transferência rápida.** São três problemas diferentes.
-2. **Nenhum caminho único.** BLE descobre; se já houver LAN comum, usa TCP nela; senão sobe
-   hotspot; se o hotspot falhar, tenta Wi-Fi Direct; se tudo falhar, QR code.
+2. **Nenhum caminho único.** NFC (ou BLE) dispara; se o Wi-Fi Direct funcionar, o receptor cria o
+   grupo e o emissor entra direto; se falhar, sobe hotspot local; se os dois já estiverem numa
+   LAN comum, usa TCP nela; se tudo falhar, QR code.
 3. **Sem servidor, sem conta, sem nuvem.** Tudo local.
 4. **Segurança por padrão.** Nada é transferido sem confirmação explícita do receptor.
 
@@ -155,8 +157,11 @@ core/proximity/          RSSI BLE (+ UWB quando houver) → "quão perto" → ga
 3. **Handshake:** X25519 → HKDF → chave de sessão. Ambos derivam um **SAS de 6 dígitos**.
 4. **Confirmação:** o receptor confirma na tela; o SAS é conferido (ou o vínculo é feito por
    toque NFC, que dispensa digitar).
-5. **Transporte:** se os dois já estão na mesma LAN, abre TCP nela. Senão o emissor sobe um
-   LocalOnlyHotspot e o receptor entra via `WifiNetworkSpecifier`. Wi-Fi Direct é o plano B.
+5. **Transporte:** o receptor cria o grupo Wi-Fi Direct (5 GHz, canal 149) e publica nome,
+   SSID, senha e frequência pelo toque NFC; o emissor entra direto com SSID/senha, sem
+   descoberta, WPS ou provision discovery. Se o P2P não estiver disponível, o receptor sobe um
+   LocalOnlyHotspot e o emissor entra via `WifiNetworkSpecifier`. Se os dois já estiverem na
+   mesma LAN, abre TCP nela.
 6. **Transferência:** frames de 1 MiB, SHA-256 por arquivo, ACK por janela, retomada por offset.
 7. **Fim:** grava em `Downloads/EasyDrop/` via MediaStore, notifica, apaga buffers.
 
@@ -239,8 +244,8 @@ Sem isso, o resto é chute.
 | Root | não |
 
 **Decisão da Fase 0:** Wi-Fi Aware sai do caminho principal — o aparelho de referência não o
-oferece. O transporte passa a ser **BLE (descoberta) + LAN comum/LocalOnlyHotspot (dados)**,
-com Wi-Fi Direct como plano B.
+oferece. O transporte passa a ser **NFC (gatilho) + Wi-Fi Direct (dados)**, com LocalOnlyHotspot
+como reserva e LAN comum quando ela já existe.
 
 **Transporte medido (30/10/2026, aparelhos a ~20 cm):**
 
@@ -261,7 +266,8 @@ Conclusões:
 
 ### Fase 1 — MVP EasyDrop ↔ EasyDrop (3–4 semanas)
 
-- Descoberta BLE + conexão por LAN comum ou LocalOnlyHotspot; fallback Wi-Fi Direct.
+- Descoberta NFC (toque) com BLE como alternativa; conexão por Wi-Fi Direct; fallback
+  LocalOnlyHotspot ou LAN comum.
 - Handshake, SAS, confirmação, transferência com hash e retomada.
 - UI: share sheet, card de recebimento, progresso, histórico.
 - 1 arquivo → N arquivos → pasta → arquivo grande (>2 GB).
@@ -341,14 +347,14 @@ consumo de bateria por transferência.
 1. Escopo: **Android apenas**, sem Apple.
 2. Fase 1: **só EasyDrop ↔ EasyDrop**.
 3. Licença: **GPL-3.0**.
-4. Sem repositório e sem código até o plano ser aprovado.
+4. Repositório e laboratório já criados; o `:lab` é a base de código validada.
 
-**Pendentes (antes de criar o repositório):**
+**Pendentes (antes do app de produto):**
 
-1. **Application ID** — sugestão `dev.leandro.easydrop` ou `br.com.easydrop.app`.
+1. **Application ID** — `dev.leandro.easydrop` (o lab usa `.lab` e o diagnóstico usa `.diag`).
 2. **Identidade visual** — nome do app já está fechado; falta ícone e paleta.
-3. **Confirmar Fase 0** — rodar o app de diagnóstico nos dois aparelhos antes de escrever
-   qualquer linha do produto.
+3. **Camada de produto** — share sheet, MediaStore, progresso, hash e foreground service.
+4. **Criptografia** — handshake X25519 + HKDF + AEAD antes de qualquer uso fora do laboratório.
 
 ---
 
@@ -368,23 +374,47 @@ conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada test
 | NFC + Hotspot | toque NFC (AID próprio) | APDU entrega SSID/senha, `WifiNetworkSpecifier` entra | **funciona** |
 | Wi-Fi Direct | toque NFC entrega nome + SSID/senha | grupo P2P: receptor é dono, emissor entra | **funciona** |
 
-### Medições (31/10/2026)
+Os quatro modos usam o mesmo `TcpLink` para os 16 MB: ACK final, timeout de inatividade,
+cancelamento de verdade e a mesma medição. Por isso os números são comparáveis entre si.
 
-| Caminho | Setup | Throughput no receptor |
+### Medições (01/11/2026)
+
+| Caminho | Setup | Throughput |
 |---|---|---|
-| LAN + mDNS | 1,5 s para conectar | 4,6 MB/s (limitado pelo AP) |
+| LAN + mDNS | 0,3–3,6 s para conectar | 1,6–5,7 MB/s (limitado pelo AP) |
 | BLE: anúncio → RSSI | 0,1–0,6 s | — |
 | BLE: GATT com credenciais | 0,7–1,3 s | — |
 | NFC: toque → credenciais | **0,02 s** | — |
-| Hotspot: S21 hospeda, Edge recebe | 5–15 s | **12,7 MB/s** |
-| Hotspot: S21 hospeda, Edge envia | 15 s | **6,0 MB/s** |
-| Hotspot: Edge hospeda, S21 envia | 8 s | **13,0 MB/s** |
-| Hotspot: Edge hospeda, S21 recebe | 5–47 s | **2,7 MB/s** |
-| P2P: S21 dono, Edge envia (5 GHz) | toque → TCP **1,1–1,2 s** | **25,5–26,3 MB/s** |
-| P2P: Edge dono, S21 envia (5 GHz) | toque → TCP **1,2 s** | **11,1–26,3 MB/s** |
+| Hotspot: Edge hospeda, S21 envia | 7–10 s (diálogo do sistema) | **10,2–11,8 MB/s** |
+| P2P: Edge dono, S21 envia (5 GHz) | toque → grupo **0,86 s** (mediana) | **41,3–47,9 MB/s** |
+| P2P: S21 dono, Edge envia (5 GHz) | toque → grupo ~1,2 s | **35,5–36,2 MB/s** |
 
-O caminho antigo de P2P (descoberta + WPS) levava 3,8–4,8 s e rendia 5,0–14,5 MB/s. A conexão
-rápida por SSID/senha tirou a descoberta do caminho crítico e estabilizou o setup em ~1,1 s.
+O P2P é medido do toque até o grupo formado; o TCP acrescenta 18–150 ms. O caminho antigo
+(descoberta + WPS) levava 3,8–4,8 s e rendia 5,0–14,5 MB/s.
+
+### Validação das correções e experimentos (01/11/2026)
+
+Correções aplicadas e verificadas no aparelho:
+
+| Item | Resultado |
+|---|---|
+| `WAKE_LOCK` declarado | lock agora aparece em `dumpsys wifi`; `mPowerSaveDisableRequests` continua 0 e a taxa não muda (11,6 vs 11,5 MB/s). Correção mantida porque a falha era silenciosa. |
+| `TcpLink` com socket ativo, ACK de 10 s e idle de 30 s | `Parar` no meio fecha o socket, libera a porta 8992 e não deixa grupo; 4 testes de loopback. |
+| `setupMs` separado do total | as duas pontas reportam o mesmo setup; o total aparece no MB/s. |
+| LAN no mesmo `TcpLink` | emissor e receptor ficam dentro de 1% (ex.: 2,5 vs 2,5 MB/s); 1 falha de mDNS em 6 execuções. |
+| Chips após erro | troca de modo volta o estado para `IDLE`; coberto por teste. |
+| `onDestroy` para o controlador | voltar pelo sistema derruba grupo e porta. |
+| Senha do hotspot mascarada | log mostra `hotspot pronto (AndroidShare_xxxx / ***)`. |
+| Permissões por versão | em API 35 só pede as "nearby"; localização negada e P2P/BLE/hotspot continuam funcionando. |
+| Limpeza do P2P ao parar | `P2pCleanup` sempre roda como fallback, com timeout de 2 s. |
+
+Experimentos decididos:
+
+| Item | Resultado | Decisão |
+|---|---|---|
+| E5 — broadcast de conexão no P2P | toque → grupo caiu de ~1,14 s para ~0,86 s de mediana; pior caso de 2,16 s para 0,95 s | **aceito** |
+| E7 — buffer de socket de 8 MB | mediana 40,0 MB/s contra 46,7 MB/s com 4 MB | **rejeitado**; fica 4 MB |
+| E11 — canal 36 (5180 MHz) | `createGroup` falha no Edge e o fallback automático escolhe 5745 MHz | **rejeitado**; fica 149 |
 
 ### Wi-Fi Direct: de onde vinha o diálogo
 
@@ -405,7 +435,9 @@ A correção foi mudar o caminho:
 - a frequência publicada faz o emissor escanear só o canal do grupo (5745 MHz), em vez de
   varrer todas as bandas.
 
-Resultado: 6 execuções (3 em cada direção), nenhum diálogo e toque → grupo em 1,0–1,1 s.
+Resultado: 6 execuções (3 em cada direção), nenhum diálogo e toque → grupo em ~1,1 s. Com o
+broadcast de `WIFI_P2P_CONNECTION_CHANGED_ACTION`, a mediana caiu para ~0,86 s (o poll de 500 ms
+continua como rede de segurança).
 
 ### Wi-Fi Direct: grupo velho e 5 GHz
 
@@ -418,10 +450,10 @@ Resultado: 6 execuções (3 em cada direção), nenhum diálogo e toque → grup
   todas as execuções.
 - **A frequência real só aparece depois do `createGroup()`.** O `requestGroupInfo()` é repetido
   a cada 500 ms até trazer a frequência; é ela que vai no payload NFC, não a pedida.
-- **A variância da Edge como receptora é concorrência STA+P2P.** A STA da Edge está em 5 GHz
-  (canal 36) e o grupo em 5745 MHz; o rádio divide tempo entre os dois e o receptor oscila entre
-  11 e 26 MB/s. A STA do S21 está em 2,4 GHz, então o grupo em 5 GHz fica limpo e o S21 como
-  receptor entrega 25,5–26,3 MB/s de forma estável. Não é diferença de Wi-Fi 6 para Wi-Fi 7.
+- **A banda da STA do emissor é o que pesa.** A variância antiga da Edge como receptora (11–26 MB/s)
+  era concorrência STA+P2P: a STA dela estava em 5 GHz (canal 36) e dividia o rádio com o grupo
+  em 5745 MHz. Com as duas STAs em 2,4 GHz, o grupo em 5 GHz fica limpo e o mesmo par entrega
+  35–48 MB/s nas duas direções. Não é diferença de Wi-Fi 6 para Wi-Fi 7.
 - **Grupo em 2,4 GHz não resolve a concorrência.** Forçando o grupo em 2412 MHz com a Edge como
   receptora, a taxa caiu para 2,8–3,9 MB/s nas três execuções. O problema é a STA do **emissor**:
   o S21 envia com a STA em 2,4 GHz e passa a disputar a mesma banda com o grupo. A banda da STA
@@ -452,10 +484,12 @@ tratada como "local-only", o que derruba o Rx para 17 Mbps. Removendo, o mesmo t
 **5. O setup do hotspot é dominado pelo diálogo do sistema.** `NetworkRequestDialogActivity`
 ("Conectar ao aparelho?") espera um toque; é ele que faz o setup variar de 5 a 47 s. O
 `WifiLock` de baixa latência não desliga o power save nessa rede (`mPowerSaveDisableRequests 0`).
+O lock também nunca era adquirido por falta de `WAKE_LOCK`; com a permissão ele aparece no
+`dumpsys wifi`, mas a taxa fica igual (11,6 vs 11,5 MB/s de mediana).
 
 Consequência para a Fase 1: **Wi-Fi Direct como transporte principal** — sem confirmação manual,
-~1,2 s de setup e ~25 MB/s no receptor quando o grupo não disputa a banda com a STA — e hotspot
-local como reserva para aparelhos sem P2P. O toque NFC continua sendo o gatilho nos dois. O grupo
+~0,86 s de setup e 35–48 MB/s quando o grupo não disputa a banda com a STA — e hotspot local
+como reserva para aparelhos sem P2P. O toque NFC continua sendo o gatilho nos dois. O grupo
 fica fixo em 5 GHz (canal 149): a banda que importa é a da STA do emissor, então não há como
 escolher o canal pelo receptor antes do toque.
 

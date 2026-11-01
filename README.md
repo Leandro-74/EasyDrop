@@ -6,7 +6,8 @@ Sem conta, sem nuvem, sem servidor. A descoberta e a transferência acontecem in
 entre os dois aparelhos.
 
 > **Status:** início de desenvolvimento. A Fase 0 (validação de hardware e transporte) está
-> concluída; o app de hoje é uma ferramenta de diagnóstico, não o produto final.
+> concluída e o laboratório de protocolos já validou os quatro caminhos nos dois aparelhos. O
+> app de produto ainda não existe: o que está no repositório é diagnóstico + laboratório.
 
 ---
 
@@ -19,8 +20,9 @@ ou parear manualmente.
 
 Tudo é local:
 
-- descoberta por **Bluetooth LE** (e mDNS quando os dois já estão na mesma rede);
-- transporte por **LAN comum** ou **hotspot local** criado na hora;
+- gatilho por **toque NFC** (com BLE como alternativa);
+- transporte por **Wi-Fi Direct** (receptor cria o grupo em 5 GHz), com hotspot local ou LAN
+  comum como reserva;
 - conteúdo cifrado de ponta a ponta, com confirmação explícita de quem recebe.
 
 ## Status do projeto
@@ -39,25 +41,30 @@ O plano técnico completo, com decisões, riscos e medições, está em [`PLANO.
 1. **Descoberta.** Quem recebe anuncia um serviço BLE com UUID próprio do EasyDrop. Quem envia
    escaneia, mede o RSSI e mostra o card quando o aparelho está perto o suficiente. No modo
    toque, quem recebe emula um cartão NFC e as credenciais saem no encostar.
-2. **Transporte.** Se os dois já estão na mesma rede Wi-Fi, usa TCP nela. Senão **quem recebe**
-   sobe um hotspot local e quem envia entra via `WifiNetworkSpecifier` — o Android mostra um
-   único diálogo de confirmação, que se encaixa no fluxo de "Receber". O hotspot fica no lado
-   que recebe porque o cliente do specifier transmite bem mas recebe devagar (ver `PLANO.md`).
+2. **Transporte.** **Quem recebe** cria o grupo Wi-Fi Direct em 5 GHz e publica nome, SSID,
+   senha e frequência pelo toque; quem envia entra direto com SSID/senha, sem descoberta, WPS ou
+   diálogo de confirmação. Se o P2P não estiver disponível, quem recebe sobe um hotspot local e
+   quem envia entra via `WifiNetworkSpecifier` — o Android mostra um único diálogo, que se
+   encaixa no fluxo de "Receber". Se os dois já estiverem na mesma rede Wi-Fi, usa TCP nela.
 3. **Confirmação.** Handshake X25519, chave de sessão derivada por HKDF e um código de 6
    dígitos (SAS) que os dois lados comparam. Nada é transferido sem confirmação.
 4. **Transferência.** Frames de 1 MiB, SHA-256 por arquivo, retomada por offset.
 
 ## O que já foi validado
 
-Medições reais em 30/10/2026, com os aparelhos a ~20 cm:
+Medições reais em 01/11/2026, com os aparelhos a ~20 cm:
 
 | Caminho | Resultado |
 |---|---|
 | BLE (descoberta) | 13 anúncios em 10 s, RSSI −32 a −39 dBm, simétrico |
 | NFC (toque → credenciais) | **0,02 s** |
-| Wi-Fi Direct (toque → TCP) | **3,8–4,8 s**, sem diálogo, **5–14,5 MB/s** |
-| Hotspot + `WifiNetworkSpecifier` | **6–13 MB/s**, 1 diálogo do sistema |
-| LAN comum | 4,4 MB/s (limitado pelo AP de teste, não pelo protocolo) |
+| Wi-Fi Direct (toque → grupo) | **0,86 s** de mediana, sem diálogo, **35–48 MB/s** |
+| Hotspot + `WifiNetworkSpecifier` | **10–12 MB/s**, 1 diálogo do sistema |
+| LAN comum | 1,6–5,7 MB/s (limitado pelo AP de teste, não pelo protocolo) |
+
+O laboratório também tem testes unitários de regressão para o transporte TCP (transferência
+completa, cancelamento no meio, timeout de ACK e timeout de inatividade), para a configuração
+do grupo P2P e para a seleção de modo/papel e permissões.
 
 ### Por que não Wi-Fi Aware
 
@@ -77,9 +84,10 @@ caminho principal e virou bônus opcional.
 ## Estrutura
 
 ```
-app/        diagnóstico da Fase 0 (capacidades de rádio, hotspot, BLE, throughput)
-lab/        laboratório de protocolos: testa um caminho de conexão por vez
-PLANO.md    plano técnico: protocolos, arquitetura, riscos, medições
+app/            diagnóstico da Fase 0 (capacidades de rádio, hotspot, BLE, throughput)
+lab/            laboratório de protocolos: testa um caminho de conexão por vez
+PLANO.md        plano técnico: protocolos, arquitetura, riscos, medições
+MELHORIAS.md    análise, correções propostas e experimentos, com o resultado de cada um
 ```
 
 ### Laboratório (`lab/`)
@@ -100,6 +108,10 @@ Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `NFC` (toque + hotspot)
 (toque + Wi-Fi Direct). No toque, quem **recebe** cria o grupo/hotspot e quem **envia** entra
 e empurra os dados. No Wi-Fi Direct o receptor publica nome, SSID, senha e frequência; o
 emissor entra direto com SSID/senha, sem descoberta, WPS ou diálogo de confirmação.
+
+Os quatro modos usam o mesmo `TcpLink`: ACK final de 10 s, timeout de inatividade de 30 s,
+`Parar` que fecha o socket ativo e a mesma medição de taxa. O `setupMs` é só o tempo até a
+conexão, separado do total.
 
 ```bash
 ./gradlew :lab:testDebugUnitTest

@@ -1,8 +1,8 @@
 # EasyDrop — Análise e propostas de evolução
 
-> **01/11/2026 · documento de planejamento.** Nenhum código foi alterado.
-> Objetivo: listar correções, otimizações e próximos passos para testar antes de decidir o que
-> vale implementar. Cada item tem uma forma de medir e um critério de aceitação.
+> **01/11/2026 · documento de análise e registro.** A primeira rodada de correções e
+> experimentos foi executada nos dois aparelhos. O que foi aceito, o que foi rejeitado e o
+> número medido de cada item estão na seção 1.1.
 
 ---
 
@@ -10,8 +10,8 @@
 
 O laboratório já provou o caminho principal: o NFC entrega as credenciais, o receptor cria o
 grupo Wi-Fi Direct em 5745 MHz, o emissor entra direto com SSID/senha e o TCP sustenta
-~25 MB/s com setup de ~1,1 s. O que falta não é "fazer funcionar"; é transformar o experimento
-em produto e corrigir alguns vícios de laboratório que podem estar distorcendo as medições.
+35–48 MB/s com setup de ~0,86 s de mediana. O que falta não é "fazer funcionar"; é transformar
+o experimento em produto.
 
 Prioridades, em ordem:
 
@@ -28,7 +28,43 @@ Prioridades, em ordem:
 6. **Criptografia antes de expor para fora.** O lab transfere texto claro; o produto precisa de
    handshake, chave de sessão e confirmação.
 
-O resto do documento detalha cada ponto, com esforço, risco e como testar.
+Estado: os itens 1–4 foram aplicados e validados; o item 5 é o próximo passo e o 6 vem antes de
+qualquer uso fora do laboratório.
+
+### 1.1 Resultado da validação
+
+**Correções.** Todas verificadas no aparelho, com teste automatizado quando a lógica é pura.
+
+| Item | O que foi feito | Resultado |
+|---|---|---|
+| C1/E1 | `WAKE_LOCK` declarado e falha do lock registrada | lock aparece em `dumpsys wifi`, mas `mPowerSaveDisableRequests` segue 0 e a taxa não muda (11,6 vs 11,5 MB/s). Mantido: era falha silenciosa. |
+| C2 | `stop` fecha o socket ativo | parada no meio libera a porta 8992 e não deixa grupo; teste de loopback. |
+| C3 | timeouts de ACK (10 s) e inatividade (30 s) | emissor e receptor falham com mensagem clara; 2 testes de loopback. |
+| C4 | `setupMs` separado do total | as duas pontas reportam o mesmo setup; coberto por teste. |
+| C5/E4 | LAN usa o mesmo `TcpLink` | emissor e receptor dentro de 1% (ex.: 2,5 vs 2,5 MB/s); 1 falha de mDNS em 6 execuções. |
+| C6 | chips aceitam troca depois de erro | estado volta para `IDLE`; 3 testes. |
+| C7 | `onDestroy` para o controlador | voltar pelo sistema derruba grupo e porta. |
+| C8 | senha do hotspot mascarada | log mostra `hotspot pronto (AndroidShare_xxxx / ***)`. |
+| C9 | permissões por versão | em API 35 só as "nearby"; localização negada e P2P/BLE/hotspot funcionam. |
+| C11 | `P2pCleanup` sempre como fallback | `Parar` remove o grupo mesmo quando `removeGroup` falha; timeout de 2 s. |
+
+C10 (P2P sem NFC) e C12 (documentação) seguem: C10 é funcionalidade de produto, C12 foi feito
+nesta rodada.
+
+**Experimentos.**
+
+| ID | Hipótese | Medição | Decisão |
+|---|---|---|---|
+| E1 | `WAKE_LOCK` melhora o hotspot | 11,6 vs 11,5 MB/s; lock adquirido, power save intacto | correção mantida, ganho **rejeitado** |
+| E2 | fechar o socket ativo torna o "Parar" imediato | parada < 1 s, porta livre, sem grupo obsoleto | **aceito** |
+| E3 | separar `setupMs` corrige a leitura | setup final igual ao "conectado em Xms" | **aceito** |
+| E4 | unificar a LAN iguala as pontas | diferença < 1% entre emissor e receptor | **aceito** |
+| E5 | broadcast do P2P reduz o setup | mediana 1,14 s → 0,86 s; pior caso 2,16 s → 0,95 s | **aceito** |
+| E7 | buffer de socket de 8 MB melhora a taxa | 40,0 vs 46,7 MB/s de mediana | **rejeitado**; fica 4 MB |
+| E11 | canal 36 rende mais que 149 | `createGroup` falha no Edge e o automático escolhe 5745 MHz | **rejeitado**; fica 149 |
+
+Não executados nesta rodada: E6/E8 (arquivo real e térmica exigem a camada de produto), E9
+(grupo persistente), E10 (fluxos paralelos), E12–E19.
 
 ---
 
@@ -54,7 +90,7 @@ O resto do documento detalha cada ponto, com esforço, risco e como testar.
 
 ### 3.1 Prioridade alta
 
-#### C1. `WifiLock` sem `WAKE_LOCK` — o lock nunca foi adquirido
+#### C1. `WifiLock` sem `WAKE_LOCK` — o lock nunca foi adquirido — **aplicado**
 
 **Onde:** `lab/src/main/AndroidManifest.xml` (falta a permissão) e
 `HotspotLink.kt` (`acquireWifiLock`).
@@ -83,7 +119,7 @@ decisão de transporte. Se não mudar, o lock não era o gargalo.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C2. `stop()` não interrompe a transferência em andamento
+#### C2. `stop()` não interrompe a transferência em andamento — **aplicado**
 
 **Onde:** `TcpLink.kt` (`stop`), `LanMode.kt` (`stop`), e por consequência `HotspotLink`,
 `BleMode`, `NfcMode` e `WifiDirectMode`.
@@ -110,7 +146,7 @@ funciona e o tempo de parada fica abaixo de 1 s.
 
 **Esforço:** baixo/médio. **Risco:** baixo.
 
-#### C3. Leitura do ACK sem timeout
+#### C3. Leitura do ACK sem timeout — **aplicado**
 
 **Onde:** `TcpLink.kt`, `send()`: `socket.getInputStream().read()` depois do envio.
 
@@ -125,7 +161,7 @@ responde; o emissor deve falhar em ~10 s, não travar.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C4. `setupMs` final é o tempo total, não o setup
+#### C4. `setupMs` final é o tempo total, não o setup — **aplicado**
 
 **Onde:** `TcpLink.kt` (status final de `serve`/`send`) e `LanMode.kt` (status final de
 `sendPayload`/`receivePayload`).
@@ -144,7 +180,7 @@ mesmo "TCP: conectado em Xms" do log.
 
 ### 3.2 Prioridade média
 
-#### C5. LAN e P2P medem coisas diferentes
+#### C5. LAN e P2P medem coisas diferentes — **aplicado**
 
 **Onde:** `LanMode.kt` vs `TcpLink.kt`; `app/src/main/java/dev/leandro/easydrop/diag/LanTransfer.kt`
 é uma terceira cópia.
@@ -163,7 +199,7 @@ receptor. Critério: as duas pontas ficam dentro de ~5% e o tempo de conclusão 
 
 **Esforço:** médio. **Risco:** baixo.
 
-#### C6. Chips de modo/papel habilitados após erro, mas sem efeito
+#### C6. Chips de modo/papel habilitados após erro, mas sem efeito — **aplicado**
 
 **Onde:** `LabController.kt` (`selectMode`/`selectRole` só aceitam `Phase.IDLE`) e
 `MainActivity.kt` (`enabled = !running`, e `ERROR` não conta como "running").
@@ -179,7 +215,7 @@ modo deve refletir no estado.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C7. `MainActivity` não para o controlador ao ser destruída
+#### C7. `MainActivity` não para o controlador ao ser destruída — **aplicado**
 
 **Onde:** `MainActivity.kt` — não há `onDestroy`.
 
@@ -194,7 +230,7 @@ a porta sumiram.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C8. Senha do hotspot no log
+#### C8. Senha do hotspot no log — **aplicado**
 
 **Onde:** `HotspotLink.kt`: `LabLog.add("hotspot pronto ($ssid / $pass)")`.
 
@@ -208,7 +244,7 @@ usar `BuildConfig.DEBUG` e um canal separado.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C9. Permissões pedidas em excesso no Android 13+
+#### C9. Permissões pedidas em excesso no Android 13+ — **aplicado**
 
 **Onde:** `MainActivity.kt` (`requiredPermissions`).
 
@@ -224,7 +260,7 @@ funcionar sem localização em API 35.
 
 **Esforço:** baixo. **Risco:** baixo.
 
-#### C10. `WifiDirectMode` exige NFC mesmo quando o P2P não precisa
+#### C10. `WifiDirectMode` exige NFC mesmo quando o P2P não precisa — **pendente (produto)**
 
 **Onde:** `WifiDirectMode.start()` chama `beam.problem()` e falha se o NFC estiver desligado.
 
@@ -238,7 +274,7 @@ peer") para o P2P. Para o produto, o NFC é o atalho premium, não o único cami
 
 **Esforço:** médio. **Risco:** baixo.
 
-#### C11. Grupo velho pode sobreviver se `removeGroup` falhar
+#### C11. Grupo velho pode sobreviver se `removeGroup` falhar — **aplicado**
 
 **Onde:** `WifiDirectMode.stop()` e `LabController.stop()`.
 
@@ -254,7 +290,7 @@ que o TCP conecta no dono certo.
 
 **Esforço:** baixo/médio. **Risco:** baixo.
 
-#### C12. Documentação desatualizada
+#### C12. Documentação desatualizada — **aplicado**
 
 **Onde:** `PLANO.md` e `README.md`.
 
@@ -266,12 +302,15 @@ que o TCP conecta no dono certo.
 - `PLANO.md` §6 (Fase 1) trata Wi-Fi Direct como fallback, enquanto §11 o coloca como principal.
 - `PLANO.md` §10 fala em "antes de criar o repositório", que já existe.
 - `README.md` ainda mostra P2P com "3,8–4,8 s" e "5–14,5 MB/s", números do caminho antigo; o
-  caminho rápido está em ~1,1 s e ~25 MB/s.
+  caminho rápido está em ~0,86 s e 35–48 MB/s.
 - `README.md` e `PLANO.md` não registram o experimento de 2,4 GHz (já documentado em §11, mas o
   README não aponta para ele).
 
 **Correção proposta:** atualizar os dois documentos e adicionar um "Estado atual" com data,
 números e link para este arquivo. É barato e evita decisões baseadas em dados velhos.
+
+**Resultado:** `PLANO.md` e `README.md` foram atualizados com as medições de 01/11/2026 e o
+`README.md` aponta para este documento.
 
 **Esforço:** baixo. **Risco:** nenhum.
 
@@ -279,12 +318,12 @@ números e link para este arquivo. É barato e evita decisões baseadas em dados
 
 | ID | Onde | Problema | Correção |
 |---|---|---|---|
-| C13 | `TcpLink.send` | `sendBufferSize`/`receiveBufferSize` fora de `runCatching`; pode lançar em aparelhos que limitam o buffer | envolver em `runCatching` como em `tune` |
-| C14 | `TcpLink` | `server` e `startedAt` não são `@Volatile`; `stop` e a thread de transferência competem | `@Volatile`/`AtomicLong` |
+| C13 | `TcpLink.send` | ~~`sendBufferSize`/`receiveBufferSize` fora de `runCatching`~~ — **aplicado** | buffers agora em `runCatching` |
+| C14 | `TcpLink` | ~~`server` e `startedAt` sem `@Volatile`~~ — **aplicado** | campos anotados com `@Volatile` |
 | C15 | `LabScreen` | `LaunchedEffect(lines.size)` para de rolar quando o log bate em 400 linhas | usar a última linha ou um contador monotônico |
 | C16 | `BleMode` | `onCharacteristicReadRequest` ignora `offset` e o MTU; payload maior que o MTU quebra | responder a partir do offset e truncar no MTU |
 | C17 | `BleMode` | escolhe o primeiro anúncio acima do limiar, não o mais forte | janela de 1–2 s + escolher o maior RSSI |
-| C18 | `LanMode` | `resolveService` concorrente pode dar `FAILURE_ALREADY_ACTIVE`; `Socket(host, port)` sem timeout | serializar resolves com retry; timeout de conexão |
+| C18 | `LanMode` | `resolveService` concorrente pode dar `FAILURE_ALREADY_ACTIVE` (o timeout de conexão já foi resolvido pelo `TcpLink`) | serializar resolves com retry |
 | C19 | `NfcBeam.present` | não confere se o NFC continua ligado; falha silenciosa | checar `nfc.isEnabled` e reportar |
 | C20 | `EasyDropApduService` | resposta HCE curta limita o payload a ~255 bytes; sem chunking | definir limite e, se crescer, usar APDU estendida/chunking |
 | C21 | `NfcMode`/`WifiDirectMode`/`BleMode` | payload delimitado por `\n`; SSID/nome com newline quebra o parsing | codec binário/TLV com tamanho por campo (ver §4) |
@@ -295,10 +334,9 @@ números e link para este arquivo. É barato e evita decisões baseadas em dados
 
 ## 4. Estrutura: o lab precisa usar o código do produto
 
-Hoje existem **três** implementações de transferência:
+Hoje existem **duas** implementações de transferência:
 
-- `lab/TcpLink.kt` (P2P e hotspot, com ACK);
-- `lab/LanMode.kt` (LAN, sem ACK, com sleep);
+- `lab/TcpLink.kt` (LAN, P2P e hotspot, com ACK, timeouts e cancelamento);
 - `app/diag/LanTransfer.kt` (diagnóstico, 32 MB, outra cópia).
 
 E **três** parsers de credenciais:
@@ -363,7 +401,8 @@ Testar o codec em JVM com `PipedInputStream`/`PipedOutputStream` ou sockets de l
 
 ### 5.1 Primeiro, o harness
 
-Sem uma medição repetível, cada otimização vira opinião. Proposta:
+Sem uma medição repetível, cada otimização vira opinião. A rodada de 01/11/2026 usou scripts
+ad hoc de `adb`; o harness versionado continua sendo o próximo passo. Proposta:
 
 - o lab aceita `--es runId <id>` e `--es payloadMB <n>` e emite uma linha JSON por execução:
   `BENCH {"runId":...,"mode":"P2P","role":"SENDER","setupMs":...,"mbps":...,"groupMhz":...}`;
@@ -406,6 +445,10 @@ adb shell dumpsys batterystats --charged | grep -i easydrop
 | E18 | CI pega regressões | GitHub Actions com build + testes + lint | pipeline verde | S |
 | E19 | Interop Quick Share é viável | spike com Bada/NearDrop | enviar para o Edge sem GMS | L |
 
+**Resultado:** E1 manteve a correção sem ganho de taxa (11,6 vs 11,5 MB/s); E2, E3, E4 e E5
+foram aceitos; E7 foi rejeitado (40,0 vs 46,7 MB/s com 8 MB); E11 foi rejeitado (o Edge recusa
+5180 MHz e o automático escolhe 5745). O detalhe está na seção 1.1.
+
 ### 5.3 Detalhes dos experimentos que eu faria primeiro
 
 **E1 — `WAKE_LOCK` no hotspot.** É o de maior alavancagem porque pode invalidar uma conclusão
@@ -418,13 +461,13 @@ reserva e a decisão de transporte precisa ser revista com números novos.
 e `WIFI_P2P_PEERS_CHANGED_ACTION` tende a reagir mais rápido e gastar menos. Meça o setup em 10
 execuções; se a mediana cair 100–300 ms, vale.
 
-**E6/E7/E8 — throughput real.** Os 25 MB/s atuais são com 16 MB e sem gravar em disco. O
+**E6/E7/E8 — throughput real.** Os 35–48 MB/s atuais são com 16 MB e sem gravar em disco. O
 número que importa é arquivo real de 1–4 GB, com gravação em `MediaStore`, tela apagada e
 transferência contínua. Antes de otimizar, descubra o teto real. Teste `FileChannel.transferTo`,
 buffer de 1 MB e socket de 8 MB; se nada mudar, o limite é o rádio ou o armazenamento, e não o
 código.
 
-**E9 — grupo persistente.** O setup de ~1,1 s é dominado pela formação do grupo. Manter o grupo
+**E9 — grupo persistente.** O setup de ~0,86 s é dominado pela formação do grupo. Manter o grupo
 vivo entre transferências pode derrubar para <0,5 s, mas custa bateria, exposição e o risco de
 grupo velho. Teste com um grupo pré-criado e 10 toques; decida com dados de bateria e falhas.
 
