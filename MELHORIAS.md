@@ -553,8 +553,8 @@ com GPL-3.0).
 - distâncias de 0,2 / 1 / 3 / 10 m, com o aparelho no bolso e na mão;
 - múltiplos aparelhos: ordenar por RSSI e nunca conectar no primeiro que aparecer;
 - NFC: posição da antena varia muito; mostrar dica visual e ter QR como plano B;
-- UWB no Edge é bônus, não base (o S21 não tem);
-- Wi-Fi Aware no S21 é bônus, não base (o Edge não expõe).
+- UWB: opcional, requer hardware compatível nos dois lados;
+- Wi-Fi Aware: opcional, requer hardware que exponha o serviço nos dois lados.
 
 ### 6.6 Performance — o que medir de verdade
 
@@ -600,9 +600,9 @@ com GPL-3.0).
   o emissor lê e entra.
 - **Canal do grupo inteligente.** Medir ocupação dos canais 5 GHz e escolher o menos congestionado
   (exige localização; testar o custo de UX).
-- **UWB no Edge.** "Apontar e compartilhar" com ranging de centímetros; só como upgrade.
-- **Wi-Fi Aware no S21.** Descoberta + ranging sem infraestrutura; só como bônus quando os dois
-  aparelhos suportarem.
+- **UWB.** "Apontar e compartilhar" com ranging de centímetros; opcional, quando houver hardware.
+- **Wi-Fi Aware.** Descoberta + ranging sem infraestrutura; opcional, quando os dois aparelhos
+  expuserem o serviço.
 - **Histórico com retry.** Lista de transferências, reenviar, abrir pasta, compartilhar de novo.
 - **Modo "só receber".** Deixar o aparelho visível por X minutos, com notificação e botão de
   parar.

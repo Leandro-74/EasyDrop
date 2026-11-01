@@ -7,24 +7,22 @@
 
 ## 1. Resumo executivo
 
-O EasyDrop é um app de compartilhamento de arquivos por proximidade: você aproxima dois
-celulares, confirma, e o arquivo vai. O objetivo estético é o NameDrop/AirDrop; o objetivo
-funcional mínimo é **EasyDrop ↔ EasyDrop** funcionando bem nos dois aparelhos de teste.
+O EasyDrop é um app de compartilhamento de arquivos por proximidade para Android. O objetivo
+funcional mínimo é a transferência **EasyDrop ↔ EasyDrop**, validada em um par de aparelhos de
+teste.
 
-A pergunta central — "dá para falar com o Quick Drop da Motorola?" — tem resposta **sim, mas
-por um caminho específico**: o Quick Drop é uma camada de marca da Motorola sobre o **Google
-Quick Share**, e o protocolo de rede do Quick Share é implementável de forma independente
-(já existem implementações open source que conversam com Android). O que **não** é viável é o
-caminho do AirDrop/iPhone via `mosey`, que exige stack de kernel e rádio específicos.
+Interoperabilidade com o Quick Drop da Motorola: o Quick Drop é uma camada de marca da Motorola
+sobre o **Google Quick Share**, e o protocolo de rede do Quick Share é implementável de forma
+independente (já existem implementações open source que conversam com Android). O caminho do
+AirDrop/iPhone via `mosey` não é viável em Android stock, porque exige stack de kernel e rádio
+específicos.
 
-Recomendação em uma linha: **Fase 1 com protocolo próprio sobre BLE (descoberta) + Wi-Fi
+Recomendação: **Fase 1 com protocolo próprio sobre NFC/BLE (descoberta) + Wi-Fi
 Direct/LocalOnlyHotspot (dados); interoperabilidade com Quick Share só depois de validar em
-hardware; Apple fica fora do escopo por decisão de produto.**
+hardware; Apple fica fora do escopo.**
 
-> **Correção depois da Fase 0:** o Edge 50 Ultra não expõe Wi-Fi Aware. O HAL do Wi-Fi suporta
-> NAN, mas a Motorola não registra o serviço `wifi_aware` no framework. Como o Edge é o
-> aparelho de referência, NAN deixa de ser o transporte principal. Ver seção 3.3 e os
-> resultados da Fase 0.
+> **Wi-Fi Aware:** não foi validado como transporte principal por falta de hardware que exponha
+> o serviço `wifi_aware`. Permanece como opcional até a validação. Ver seção 3.3.
 
 Decisões já fechadas:
 
@@ -36,7 +34,7 @@ Decisões já fechadas:
 
 ## 2. O que é o Quick Drop, em camadas
 
-| Camada | O que é | Relevância para nós |
+| Camada | O que é | Relevância |
 |---|---|---|
 | App `com.motorola.touchshare` | Stub de ~101 KB. Só integra a UI da Motorola ao share sheet. | Baixa. Decompilar isso não revela protocolo nenhum. |
 | Google Quick Share (`com.google.android.gms` + Quick Share Extension) | O protocolo real: descoberta, pareamento, criptografia, transferência. | **Alta.** É aqui que a interoperabilidade acontece. |
@@ -72,32 +70,31 @@ Isso é viável. É o que NearDrop e Packet já fazem.
   - driver Wi-Fi com suporte `wondertap` (Broadcom em Pixel 9/10 e alguns Samsung/BBK).
 - O Edge 50 Ultra (Snapdragon 8s Gen 3) e o S21 (SD888/Exynos 2100) **não** estão na lista de
   chips com `wondertap`. Sem isso, o `wonder` é um phy virtual sem RF real.
-- Ou seja: **não dá para fazer AirDrop em Android stock por API pública.** Nem com root no S21,
+- Ou seja: **não dá para fazer AirDrop em Android stock por API pública.** Nem com root,
   porque o problema é driver/rádio, não permissão.
 
-### 3.3 Wi-Fi Aware (NAN) — funciona no S21, desligado no Edge
+### 3.3 Wi-Fi Aware (NAN) — não validado
 
 - API pública desde Android 8 (`FEATURE_WIFI_AWARE`), com `publish`/`subscribe` e data path
   IPv6 link-local. Ranging (802.11mc/az) desde o Android 13.
-- **S21:** funciona. `isAvailable = true`, attach/publish/subscribe sem erro.
-- **Edge 50 Ultra:** não funciona. `hasSystemFeature` = false, `getSystemService` devolve
-  `null` e o binder `wifi_aware` não aparece no `service list` (só `wifi`, `wifip2p`,
-  `wifirtt`, `wifiscanner`). O HAL até reporta `WIFI_FEATURE_AWARE` no `dumpsys wifi`, mas a
-  Motorola não registra o serviço — o rádio suporta, o framework não expõe.
-- **Consequência:** NAN não pode ser o transporte principal, porque o aparelho de referência
-  (o que tem Quick Drop) não o oferece. Só voltaria com ROM modificada/root, o que não é
-  produto.
+- Testado em um S21: `isAvailable = true`, attach/publish/subscribe sem erro.
+- Não validado no outro aparelho de teste: `hasSystemFeature` = false, `getSystemService`
+  devolve `null` e o binder `wifi_aware` não aparece no `service list` (só `wifi`, `wifip2p`,
+  `wifirtt`, `wifiscanner`). O HAL reporta `WIFI_FEATURE_AWARE` no `dumpsys wifi`, mas o
+  serviço não é registrado no framework.
+- **Consequência:** NAN permanece opcional e fora do caminho principal até ser validado em
+  hardware que exponha o serviço. Não há decisão de produto contra ele.
 
 ### 3.4 Alternativas de transporte
 
 | Transporte | Vantagem | Limite |
 |---|---|---|
-| Wi-Fi Direct | Throughput alto, presente nos dois aparelhos | UX de pareamento chata; conflita com Wi-Fi normal |
+| Wi-Fi Direct | Throughput alto, presente na maioria dos Androids | UX de pareamento chata; conflita com Wi-Fi normal |
 | LocalOnlyHotspot | Simples, funciona em quase tudo | Sem internet; derruba o Wi-Fi do emissor em muitos aparelhos |
 | BLE | Descoberta barata e onipresente | Lento para dados; advertising em background é restrito |
-| Wi-Fi Aware | Descoberta + dados + ranging, sem infraestrutura | **Indisponível no Edge 50 Ultra**; fica como bônus opcional |
-| NFC (HCE + reader mode) | "Encostou, conectou" — o gesto que o usuário quer | Só bootstrap; exige tela ligada; não é P2P (Beam morreu) |
-| UWB | Ranging de centímetros | **S21 não tem**; só serve como upgrade no Edge |
+| Wi-Fi Aware | Descoberta + dados + ranging, sem infraestrutura | **Não validado**: requer hardware que exponha o serviço; opcional |
+| NFC (HCE + reader mode) | Encostar para conectar | Só bootstrap; exige tela ligada; não é P2P (Beam morreu) |
+| UWB | Ranging de centímetros | **Não validado**: requer hardware compatível; opcional |
 
 ### 3.5 Nearby Connections (API do Google Play Services)
 
@@ -179,13 +176,11 @@ O gesto "aproximar" tem três níveis de qualidade:
 
 1. **NFC tap** — encostar os aparelhos. Melhor UX, mais restrito (tela ligada, posição do
    sensor varia muito entre modelos).
-2. **UWB** — distância de centímetros. Só o Edge 50 Ultra tem; o S21 não, então é upgrade,
-   não base.
+2. **UWB** — distância de centímetros. Requer hardware compatível; é upgrade, não base.
 3. **RSSI BLE** — grosseiro, mas funciona em tudo. Bom o suficiente para "está perto" (≈1 m),
    ruim para "está a 30 cm".
 
-Ranging por Wi-Fi Aware sairia de graça no S21, mas o Edge não expõe o serviço — então não
-conta para o produto.
+Ranging por Wi-Fi Aware não foi validado (ver §3.3) e não conta para o produto nesta fase.
 
 Plano: RSSI como base universal, UWB como upgrade quando os dois aparelhos tiverem, NFC como
 atalho premium.
@@ -243,9 +238,9 @@ Sem isso, o resto é chute.
 | UWB | **presente** |
 | Root | não |
 
-**Decisão da Fase 0:** Wi-Fi Aware sai do caminho principal — o aparelho de referência não o
-oferece. O transporte passa a ser **NFC (gatilho) + Wi-Fi Direct (dados)**, com LocalOnlyHotspot
-como reserva e LAN comum quando ela já existe.
+**Decisão da Fase 0:** Wi-Fi Aware fica fora do caminho principal por falta de hardware
+compatível para validar; permanece opcional. O transporte base é **NFC (gatilho) + Wi-Fi Direct
+(dados)**, com LocalOnlyHotspot como reserva e LAN comum quando ela já existe.
 
 **Transporte medido (30/10/2026, aparelhos a ~20 cm):**
 
@@ -274,7 +269,7 @@ Conclusões:
 
 ### Fase 2 — Proximidade e atalhos (2 semanas)
 
-- RSSI BLE calibrado para o gesto de aproximar; UWB como upgrade no Edge.
+- RSSI BLE calibrado para o gesto de aproximar; UWB como upgrade quando houver hardware.
 - NFC tap-to-share (HCE `D2760101` + reader mode) como bootstrap.
 - QR code como fallback universal.
 - "Dispositivos confiáveis" para pular confirmação.
@@ -285,7 +280,7 @@ Só depois de a Fase 1 estar sólida.
 
 - Validar em black-box: Bada/NearDrop/Packet conseguem enviar para o Edge 50 Ultra?
 - Se sim: portar/reusar a camada de protocolo (NearDrop é Unlicense — a mais amigável).
-- Implementar UKEY2 + protobuf + mDNS/BLE do Quick Share no nosso stack.
+- Implementar UKEY2 + protobuf + mDNS/BLE do Quick Share no stack do EasyDrop.
 - **Não** redistribuir nada da Motorola ou do Google. Código próprio ou OSS compatível.
 
 ### Fora de escopo — Apple
@@ -300,9 +295,9 @@ no iOS 26+, nunca AWDL.
 
 | Risco | Prob. | Impacto | Mitigação |
 |---|---|---|---|
-| Wi-Fi Aware indisponível no Edge 50 Ultra | **confirmado** | Alto | Transporte base virou BLE + hotspot/Direct |
+| Wi-Fi Aware indisponível em parte do hardware | Confirmado nos aparelhos de teste | Médio | Não depende dele; validação futura em hardware compatível |
 | LocalOnlyHotspot derruba o Wi-Fi do emissor | Alta | Médio | Preferir LAN comum quando existir; avisar na UI |
-| Throughput do hotspot abaixo do esperado | Média | Médio | Medir na Fase 0; Wi-Fi Direct como plano B |
+| Throughput do hotspot abaixo do esperado | Média | Médio | Medir na Fase 0; Wi-Fi Direct é o caminho principal |
 | BLE advertising restrito em background | Alta | Médio | Foreground service + notificação persistente |
 | Coexistência hotspot × Wi-Fi STA × P2P | Média | Médio | Testar na Fase 0; escolher canal livre |
 | Fragmentação de fabricante (Motorola/Samsung matam serviços) | Alta | Médio | Testar com battery saver, Doze, restrições de OEM |
@@ -330,7 +325,7 @@ consumo de bateria por transferência.
 
 ---
 
-## 9. O que não vamos fazer
+## 9. Fora de escopo
 
 - Decompilar e redistribuir o app da Motorola, o Quick Share Extension ou componentes do
   `mosey`. Além de juridicamente arriscado, não ajuda: o stub não tem protocolo.

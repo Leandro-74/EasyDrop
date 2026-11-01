@@ -1,117 +1,96 @@
 # EasyDrop
 
-**Compartilhamento de arquivos por proximidade entre Androids.** Aproxime, confirme, pronto.
+Compartilhamento de arquivos por proximidade entre dispositivos Android. A transferência
+ocorre inteiramente entre os dois aparelhos: sem conta, sem nuvem, sem servidor.
 
-Sem conta, sem nuvem, sem servidor. A descoberta e a transferência acontecem inteiramente
-entre os dois aparelhos.
-
-> **Status:** início de desenvolvimento. A Fase 0 (validação de hardware e transporte) está
-> concluída e o laboratório de protocolos já validou os quatro caminhos nos dois aparelhos. O
-> app de produto ainda não existe: o que está no repositório é diagnóstico + laboratório.
+> **Status:** Fase 0 concluída. O repositório contém a ferramenta de diagnóstico (`:app`) e o
+> laboratório de protocolos (`:lab`). O app de produto (Fase 1) ainda não foi implementado.
 
 ---
 
-## O que é
+## Arquitetura
 
-O EasyDrop quer reproduzir o gesto do AirDrop e do NameDrop em Android: você aproxima dois
-celulares, o outro aparece, você confirma e o arquivo vai. O diferencial não é a transferência
-em si — é a **proximidade como interface**: nada de procurar dispositivo em lista, digitar IP
-ou parear manualmente.
+1. **Descoberta.** NFC (HCE + reader mode) é o gatilho principal: o receptor publica nome,
+   SSID, senha e frequência do grupo. BLE é a alternativa para dispositivos sem NFC.
+2. **Transporte.** O receptor hospeda a conexão; o emissor envia.
+   - Wi-Fi Direct: grupo em 5 GHz (5745 MHz, não-DFS), com fallback automático de canal.
+   - LocalOnlyHotspot + `WifiNetworkSpecifier`: reserva para dispositivos sem P2P.
+   - LAN comum: TCP direto quando os dois já estão na mesma rede.
+3. **Segurança.** X25519 + HKDF + AEAD e SAS de 6 dígitos (planejado; o laboratório ainda
+   transfere texto claro).
+4. **Transferência.** Framing por comprimento, SHA-256 por arquivo e retomada por offset
+   (Fase 1). O laboratório usa um `TcpLink` compartilhado, com ACK final, timeouts e
+   cancelamento.
 
-Tudo é local:
+## Transportes
 
-- gatilho por **toque NFC** (com BLE como alternativa);
-- transporte por **Wi-Fi Direct** (receptor cria o grupo em 5 GHz), com hotspot local ou LAN
-  comum como reserva;
-- conteúdo cifrado de ponta a ponta, com confirmação explícita de quem recebe.
-
-## Status do projeto
-
-| Fase | Escopo | Estado |
+| Transporte | Uso | Estado |
 |---|---|---|
-| 0 | Validação de hardware e transporte | **concluída** |
-| 1 | MVP EasyDrop ↔ EasyDrop | próxima |
-| 2 | Proximidade fina: NFC, RSSI calibrado, UWB | planejada |
-| 3 | Interoperabilidade com Quick Share / Quick Drop | opcional |
+| NFC (HCE + reader mode) | gatilho e troca de credenciais | validado |
+| BLE | descoberta alternativa | validado |
+| Wi-Fi Direct | dados | validado |
+| LocalOnlyHotspot | dados (reserva) | validado |
+| LAN (TCP) | dados | validado |
+| Wi-Fi Aware (NAN) | descoberta e dados | **não validado**: requer hardware que exponha o serviço `wifi_aware` |
+| UWB | ranging de proximidade | **não validado**: requer hardware compatível |
 
-O plano técnico completo, com decisões, riscos e medições, está em [`PLANO.md`](PLANO.md).
+Wi-Fi Aware e UWB permanecem no roadmap como opcionais; a validação depende de hardware
+disponível.
 
-## Como funciona
+## Validação
 
-1. **Descoberta.** Quem recebe anuncia um serviço BLE com UUID próprio do EasyDrop. Quem envia
-   escaneia, mede o RSSI e mostra o card quando o aparelho está perto o suficiente. No modo
-   toque, quem recebe emula um cartão NFC e as credenciais saem no encostar.
-2. **Transporte.** **Quem recebe** cria o grupo Wi-Fi Direct em 5 GHz e publica nome, SSID,
-   senha e frequência pelo toque; quem envia entra direto com SSID/senha, sem descoberta, WPS ou
-   diálogo de confirmação. Se o P2P não estiver disponível, quem recebe sobe um hotspot local e
-   quem envia entra via `WifiNetworkSpecifier` — o Android mostra um único diálogo, que se
-   encaixa no fluxo de "Receber". Se os dois já estiverem na mesma rede Wi-Fi, usa TCP nela.
-3. **Confirmação.** Handshake X25519, chave de sessão derivada por HKDF e um código de 6
-   dígitos (SAS) que os dois lados comparam. Nada é transferido sem confirmação.
-4. **Transferência.** Frames de 1 MiB, SHA-256 por arquivo, retomada por offset.
+Medições de 01/11/2026, transferência de 16 MB, aparelhos a ~20 cm:
 
-## O que já foi validado
+| Caminho | Setup | Throughput |
+|---|---|---|
+| BLE (descoberta) | 0,1–0,6 s | — |
+| NFC (toque → credenciais) | 0,02 s | — |
+| Wi-Fi Direct (toque → grupo) | 0,86 s (mediana) | 35–48 MB/s |
+| LocalOnlyHotspot + `WifiNetworkSpecifier` | 7–10 s (diálogo do sistema) | 10–12 MB/s |
+| LAN comum | 0,3–3,6 s | 1,6–5,7 MB/s |
 
-Medições reais em 01/11/2026, com os aparelhos a ~20 cm:
+Os valores são específicos do par de aparelhos de teste e do ambiente de rede; não
+representam todos os Androids.
 
-| Caminho | Resultado |
-|---|---|
-| BLE (descoberta) | 13 anúncios em 10 s, RSSI −32 a −39 dBm, simétrico |
-| NFC (toque → credenciais) | **0,02 s** |
-| Wi-Fi Direct (toque → grupo) | **0,86 s** de mediana, sem diálogo, **35–48 MB/s** |
-| Hotspot + `WifiNetworkSpecifier` | **10–12 MB/s**, 1 diálogo do sistema |
-| LAN comum | 1,6–5,7 MB/s (limitado pelo AP de teste, não pelo protocolo) |
-
-O laboratório também tem testes unitários de regressão para o transporte TCP (transferência
-completa, cancelamento no meio, timeout de ACK e timeout de inatividade), para a configuração
-do grupo P2P e para a seleção de modo/papel e permissões.
-
-### Por que não Wi-Fi Aware
-
-O plano inicial era usar Wi-Fi Aware (NAN) como transporte principal. O teste derrubou a
-ideia: o **Motorola Edge 50 Ultra não expõe o serviço `wifi_aware`** — o HAL do Wi-Fi até
-reporta suporte, mas a Motorola não registra o serviço no framework, então nenhum app
-consegue usá-lo. Como o Edge é o aparelho de referência (é o que tem Quick Drop), NAN saiu do
-caminho principal e virou bônus opcional.
-
-## Dispositivos de teste
+### Dispositivos de teste
 
 | Aparelho | Android | Observação |
 |---|---|---|
-| Motorola Edge 50 Ultra | 17 (SDK 37) | sem Wi-Fi Aware; tem UWB |
-| Samsung Galaxy S21 (SM-G991B) | 15 (SDK 35) | Wi-Fi Aware funciona; root via KernelSU |
+| Motorola Edge 50 Ultra | 17 (SDK 37) | Wi-Fi Direct; sem serviço `wifi_aware`; UWB presente |
+| Samsung Galaxy S21 (SM-G991B) | 15 (SDK 35) | Wi-Fi Direct; Wi-Fi Aware disponível |
 
 ## Estrutura
 
 ```
-app/            diagnóstico da Fase 0 (capacidades de rádio, hotspot, BLE, throughput)
+app/            ferramenta de diagnóstico (capacidades de rádio, hotspot, BLE, throughput)
 lab/            laboratório de protocolos: testa um caminho de conexão por vez
 PLANO.md        plano técnico: protocolos, arquitetura, riscos, medições
-MELHORIAS.md    análise, correções propostas e experimentos, com o resultado de cada um
+MELHORIAS.md    análise, correções e experimentos, com o resultado de cada um
 ```
 
-### Laboratório (`lab/`)
+## Laboratório (`lab/`)
 
-Tela inteira colorida pelo estado — cinza parado, azul procurando, âmbar peer encontrado,
-laranja conectando, **verde conectado**, verde escuro transferindo, vermelho erro. Escolha o
-modo e o papel, toque em Iniciar, e cada teste transfere 16 MB medindo tempo de setup e MB/s.
+Tela colorida por estado: cinza parado, azul procurando, âmbar peer encontrado, laranja
+conectando, verde conectado, verde escuro transferindo, vermelho erro. Cada execução transfere
+16 MB e reporta setup e MB/s.
 
 ```bash
 PKG=dev.leandro.easydrop.lab
-adb shell am start -n $PKG/.MainActivity --es action start --es mode BLE --es role SENDER
-adb shell am start -n $PKG/.MainActivity --es action start --es mode BLE --es role RECEIVER
+adb shell am start -n $PKG/.MainActivity --es action start --es mode P2P --es role SENDER
+adb shell am start -n $PKG/.MainActivity --es action start --es mode P2P --es role RECEIVER
 adb shell am start -n $PKG/.MainActivity --es action stop
 adb logcat -s EasyDropLab:I
 ```
 
 Modos: `LAN` (mDNS + TCP), `BLE` (BLE + GATT + hotspot), `NFC` (toque + hotspot) e `P2P`
-(toque + Wi-Fi Direct). No toque, quem **recebe** cria o grupo/hotspot e quem **envia** entra
-e empurra os dados. No Wi-Fi Direct o receptor publica nome, SSID, senha e frequência; o
-emissor entra direto com SSID/senha, sem descoberta, WPS ou diálogo de confirmação.
+(toque + Wi-Fi Direct). No toque, o receptor cria o grupo/hotspot e o emissor entra e envia os
+dados. No Wi-Fi Direct o receptor publica nome, SSID, senha e frequência; o emissor entra
+direto com SSID/senha, sem descoberta, WPS ou diálogo de confirmação.
 
 Os quatro modos usam o mesmo `TcpLink`: ACK final de 10 s, timeout de inatividade de 30 s,
-`Parar` que fecha o socket ativo e a mesma medição de taxa. O `setupMs` é só o tempo até a
-conexão, separado do total.
+`Parar` que fecha o socket ativo e a mesma medição de taxa. `setupMs` cobre apenas a conexão.
+
+Testes:
 
 ```bash
 ./gradlew :lab:testDebugUnitTest
@@ -119,20 +98,19 @@ conexão, separado do total.
 
 ## Compilar
 
-Requisitos: **JDK 21** e **Android SDK 35** (platform + build-tools).
+Requisitos: JDK 21 e Android SDK 35 (platform + build-tools).
 
 ```bash
-# aponte para o seu SDK
 echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 
-./gradlew :app:assembleDebug
+./gradlew :lab:assembleDebug :app:assembleDebug
+adb install -r lab/build/outputs/apk/debug/lab-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## Ferramenta de diagnóstico
 
-O app atual serve para medir o hardware. As ações podem ser disparadas por adb, sem tocar na
-tela:
+Ações disparáveis por adb:
 
 ```bash
 PKG=dev.leandro.easydrop.diag
@@ -162,10 +140,9 @@ adb logcat -s EasyDropDiag:I
 
 - [x] Fase 0 — validar hardware, escolher transporte, medir throughput
 - [ ] Fase 1 — MVP: descoberta, handshake, transferência com hash, UI
-- [ ] Fase 2 — NFC tap-to-share, RSSI calibrado, UWB no Edge
-- [ ] Fase 3 — interoperar com Quick Share (opcional)
+- [ ] Fase 2 — NFC tap-to-share, RSSI calibrado, UWB
+- [ ] Fase 3 — interoperabilidade com Quick Share (opcional)
 
 ## Licença
 
-[GPL-3.0](LICENSE). Se você reusar ou modificar o EasyDrop, o projeto derivado também precisa
-continuar aberto.
+[GPL-3.0](LICENSE). Projetos derivados devem permanecer abertos.
