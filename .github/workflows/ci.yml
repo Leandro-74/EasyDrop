@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-35
+            build-tools;35.0.0
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Testes e build
+        run: ./gradlew :protocol:test :lab:testDebugUnitTest :app:assembleDebug --console=plain
+
+      - name: Publica resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            protocol/build/test-results/test
+            lab/build/test-results/testDebugUnitTest
+          if-no-files-found: ignore
