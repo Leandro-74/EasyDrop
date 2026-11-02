@@ -16,8 +16,10 @@ ocorre inteiramente entre os dois aparelhos: sem conta, sem nuvem, sem servidor.
    - Wi-Fi Direct: grupo em 5 GHz (5745 MHz, não-DFS), com fallback automático de canal.
    - LocalOnlyHotspot + `WifiNetworkSpecifier`: reserva para dispositivos sem P2P.
    - LAN comum: TCP direto quando os dois já estão na mesma rede.
-3. **Segurança.** X25519 + HKDF + AEAD e SAS de 6 dígitos (planejado; o laboratório ainda
-   transfere texto claro).
+3. **Segurança.** Noise NK (X25519 + ChaCha20-Poly1305 + SHA-256) sobre TCP. A chave
+   pública efêmera do receptor vai no payload NFC e autentica o toque; o receptor aceita
+   sem diálogo. O laboratório ainda transfere texto claro; o `:protocol` já tem o handshake
+   e o canal cifrado.
 4. **Transferência.** Framing por comprimento, SHA-256 por arquivo e retomada por offset
    (Fase 1). O laboratório usa um `TcpLink` compartilhado, com ACK final, timeouts e
    cancelamento.
@@ -64,6 +66,8 @@ representam todos os Androids.
 ```
 app/            ferramenta de diagnóstico (capacidades de rádio, hotspot, BLE, throughput)
 lab/            laboratório de protocolos: testa um caminho de conexão por vez
+protocol/       protocolo v1 em JVM pura: payload NFC, Noise NK, frames e canal seguro
+docs/           PROTOCOL.md, ARCHITECTURE.md, SECURITY.md e NAMING.md
 PLANO.md        plano técnico: protocolos, arquitetura, riscos, medições
 MELHORIAS.md    análise, correções e experimentos, com o resultado de cada um
 ```
@@ -93,7 +97,7 @@ Os quatro modos usam o mesmo `TcpLink`: ACK final de 10 s, timeout de inatividad
 Testes:
 
 ```bash
-./gradlew :lab:testDebugUnitTest
+./gradlew :protocol:test :lab:testDebugUnitTest
 ```
 
 ## Compilar
