@@ -36,7 +36,7 @@ offset  size  campo
 3       n     name (UTF-8)
 ...     1     ssidLen (0..32)
 ...     n     ssid (UTF-8)
-...     1     passLen (0..63)
+...     1     passLen (0..64)
 ...     n     pass (UTF-8)
 ...     2     frequency (MHz, 0 = desconhecido)
 ...     32    noisePublicKey (X25519)
@@ -51,12 +51,12 @@ offset  size  campo
 | 3 | chave Noise presente | 0/1 |
 | 4–7 | reservado | 0 |
 
-Para o MVP, `flags = 0b00000011` (P2P + credenciais + chave).
+Para o MVP, `flags = 0b00001101` (P2P + credenciais + chave).
 
 ### 3.2 Limites
 
-- Tamanho máximo: `2 + (1+64) + (1+32) + (1+63) + 2 + 32 = 198` bytes.
-- Com o status word, a resposta APDU fica em 200 bytes, dentro do limite de APDU curta
+- Tamanho máximo: `2 + (1+64) + (1+32) + (1+64) + 2 + 32 = 199` bytes.
+- Com o status word, a resposta APDU fica em 201 bytes, dentro do limite de APDU curta
   (~255 bytes). O limite do HCE é o C20; se o payload crescer, será preciso chunking ou
   APDU estendida, não um codec diferente.
 
