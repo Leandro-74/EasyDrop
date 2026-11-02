@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "EasyDrop"
 include(":app")
 include(":lab")
+include(":protocol")
